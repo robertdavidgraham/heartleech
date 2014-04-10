@@ -31,7 +31,8 @@ The technique is to grab the OpenSSL library and do a custom build. Go into the
 file `t1_lib.c` and change line# 2671 like the following:
 
   `- 	s2n(payload, p);`
-  `+	  s2n(0x4444, p);`
+  
+  `+  s2n(0x4444, p);`
 
 In this example, `0x4444` is the number I've chosen arbitrarily as the number
 of bytes I want to get back, which is about 16kilobytes.
@@ -48,11 +49,11 @@ giving fewer bytes for an IDS to trigger on.
 If you look at the bytes sent, you'll now see something like the following on the
 request, where the bytes afterwards are encrypted and therefore meaningless:
 
-  18 03 03 00 3d
+  `18 03 03 00 3d`
   
 On the response side, you'll see something like the following:
 
-  18 03 03 44 5C
+  `18 03 03 44 5C`
   
 The problem here is that there aren't really enough bytes here for an IDS to pattern-match
 on. The final two bytes are "length" field and can be arbitrarly chosen by a hacker, especially
