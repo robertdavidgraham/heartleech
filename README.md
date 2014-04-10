@@ -8,7 +8,7 @@ in packets that everyone is looking for, and it doesn't generate logfile error
 messages.
 
 
-*Description*
+#Description#
 
 
 A lot of people are confused by the widely circulated test scripts that send the
@@ -79,3 +79,8 @@ current patterns that happened months ago, I'm betting it's false positives and 
 exploitation.
 
 
+#Others#
+
+Other people have different programs that do similar things to this:
+
+      https://raw.githubusercontent.com/HackerFantastic/Public/master/exploits/heartbleed.c
