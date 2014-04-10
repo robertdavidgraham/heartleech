@@ -2,7 +2,13 @@ heartleech
 ==========
 
 Demonstrates the "heartbleed" problem using full OpenSSL stack, and how simple
-pattern-matching isn't sufficient to detect this attack.
+pattern-matching isn't sufficient to detect this attack. It evades the pattern
+matching in IDS (Snort and EmergingThreat rules), it doesn't send the pattern
+in packets that everyone is looking for, and it doesn't generate logfile error
+messages.
+
+
+*Description*
 
 
 A lot of people are confused by the widely circulated test scripts that send the
