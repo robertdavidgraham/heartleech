@@ -78,6 +78,25 @@ would have writtent to exploit this bug. Therefore, if you are seeing things tha
 current patterns that happened months ago, I'm betting it's false positives and not real
 exploitation.
 
+#Snort#
+
+Since posting this, people have told me about the following blog from Snort's VRT team:
+
+    http://vrt-blog.snort.org/2014/04/performing-heartbleed-attack-after-tls.html?utm_source=twitterfeed&utm_medium=twitter
+
+Firstly, this shows exactly my point: early exploiters would've (probably) have done
+their attacks AFTER the handshake, not before.
+
+Secondly, while their signatures are better than EmergingThreat signatures, they
+aren't sufficient. They solve the inherent false positive problem by adding
+"threshold" rules, so they only trigger when people do a lot of heartbeats. It's 
+valid from one stance, but invalid from another.
+
+The proper way to detect this is with a deterministic protocol decode that KNOWS
+that this is a heartbeat, and which extracts the length, not one that matches
+patterns in packets.
+
+
 
 #Others#
 
