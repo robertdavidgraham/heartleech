@@ -30,8 +30,8 @@ or log file entries.
 The technique is to grab the OpenSSL library and do a custom build. Go into the
 file `t1_lib.c` and change line# 2671 like the following:
 
-  - 	s2n(payload, p);
-  +	  s2n(0x4444, p);
+  `- 	s2n(payload, p);`
+  `+	  s2n(0x4444, p);`
 
 In this example, `0x4444` is the number I've chosen arbitrarily as the number
 of bytes I want to get back, which is about 16kilobytes.
