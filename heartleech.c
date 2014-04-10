@@ -203,7 +203,7 @@ main(int argc, char *argv[])
     int i;
 
     if (argc <=1 ) {
-        printf("usage:\n heartbleed <target1:port> <target2:port> ...\n");
+        printf("usage:\n heartleech <target1:port> <target2:port> ...\n");
         return 1;
     }
 
