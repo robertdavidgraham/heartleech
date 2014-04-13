@@ -234,10 +234,10 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     int x;
     struct addrinfo *addr;
     int fd;
-    SSL_CTX* ctx;
-    SSL* ssl;
-    BIO* rbio;
-    BIO* wbio;
+    SSL_CTX* ctx = 0;
+    SSL* ssl = 0;
+    BIO* rbio = 0;
+    BIO* wbio = 0;
     size_t len;
     char buf[16384];
     char address[64];
@@ -539,11 +539,16 @@ again:
     DEBUG_MSG("[+] connection terminated\n");
 end:
     process_bleed(args);
-    BIO_free_all(rbio);
-    BIO_free_all(wbio);
-    SSL_free(ssl);
-    SSL_CTX_free(ctx);
-    closesocket(fd);
+    /*if (rbio)
+        BIO_free(rbio);
+    if (wbio)
+        BIO_free_all(wbio);*/
+    if (ssl)
+        SSL_free(ssl);
+    if (ctx)
+        SSL_CTX_free(ctx);
+    if (fd != -1)
+        closesocket(fd);
     return 0;
 }
 
