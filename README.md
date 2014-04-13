@@ -20,13 +20,13 @@ sometimes exported in OpenSSL libraries, and sometimes not.
 If that's the trouble, then you have to download and build OpenSSL, then
 link this tool with their object files. I did this by doing:
 
-  git clone git://git.openssl.org/openssl.git
-  cd openssl
-  ./config
-  make depend
-  make
+    git clone git://git.openssl.org/openssl.git
+    cd openssl
+    ./config
+    make depend
+    make
 
-  gcc ../heartleech/heartleech.c *.a -ldl -lssl -o heartleech
+    gcc ../heartleech/heartleech.c *.a -ldl -lssl -o heartleech
   
 This is evil, because I'm simultaneously linking to the local libraries
 and the system libraries for OpenSSL, but it seems to work without
@@ -36,7 +36,7 @@ too much trouble.
 
 Run like the following:
 
-  ./heartleech -t www.cloudflarechallenge.com -f challenge.bin -l 1000000
+    ./heartleech -t www.cloudflarechallenge.com -f challenge.bin -l 1000000
   
 This will send a million heartbeat requests to the server, which by the way will
 create a 64-gigabyte file, since each heartbeet is 64k in size. You can then
@@ -52,7 +52,7 @@ stuff until I can prove they are inadequate.
 The problem with the signatures is that they trigger on the heartbeat pattern
 as the start of the TCP payload, looking for a pattern like this:
 
-  `18 03 02 00 03 01 40 00`
+    18 03 02 00 03 01 40 00
 
 However, TCP is a not a "packet" protocol but a "streaming" protocol. While
 this bytes may be typically at the start of the TCP payload, they don't have
