@@ -88,6 +88,7 @@ struct DumpArgs {
     unsigned ip_ver;
     unsigned port;
     unsigned byte_count;
+    BIGNUM n;
     unsigned char buf[65536];
 };
 
@@ -389,7 +390,42 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     DEBUG_MSG("[+] %s:%s: SSL handshake complete [%s]\n", 
                                         address, port, SSL_get_cipher(ssl));
 
-    
+
+    /*
+     * Get the peer certificate name. We do this so that we can
+     * automatically scan the heartbleed information for 
+     * private key information
+     */
+    {
+        X509 *cert;
+
+        cert = SSL_get_peer_certificate(ssl);
+        if (cert) {
+            X509_NAME *subj;
+            EVP_PKEY *rsakey;
+
+            subj = X509_get_subject_name(cert);
+            if (subj) {
+                char name[512];
+                int len;
+                len = X509_NAME_get_text_by_NID(subj, NID_commonName, name, sizeof(name));
+                if (len > 0) {
+                    name[255] = '\0';
+                    DEBUG_MSG("[+] servername = %s\n", name);
+                }
+            }
+
+            rsakey = X509_get_pubkey(cert);
+            if (rsakey && rsakey->type == 6) {
+                BIGNUM *n = rsakey->pkey.rsa->n;
+                memcpy(&args->n, n, sizeof(args->n));
+                DEBUG_MSG("[+] RSA public-key length = %u-bits\n", n->dmax*4*8);
+            }
+        }
+
+        X509_free(cert);
+    }
+
     
     /*
      * Loop many times
