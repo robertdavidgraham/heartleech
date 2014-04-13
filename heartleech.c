@@ -45,6 +45,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #define WSAGetLastError() (errno)
 #define closesocket(fd) close(fd)
 #endif
@@ -62,18 +64,12 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <openssl/bio.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/evp.h>
-#include <openssl/tls1.h>
-#include <openssl/rand.h>
-#include <openssl/buffer.h>
 int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 
 /*
  * Stand C includes
  */
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -245,7 +241,6 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     char buf[16384];
     char address[64];
     char *http_request;
-    unsigned want_count = 0;
     size_t total_bytes = 0;
     char port[6];
     
