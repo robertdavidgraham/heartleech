@@ -1,104 +1,93 @@
 heartleech
 ==========
 
-Demonstrates the "heartbleed" problem using full OpenSSL stack, and how simple
-pattern-matching isn't sufficient to detect this attack. It evades the pattern
-matching in IDS (Snort and EmergingThreat rules), it doesn't send the pattern
-in packets that everyone is looking for, and it doesn't generate logfile error
-messages.
+A typical "heartbleed" tool. What makes this different is:
+
+  - post-handshake (encrypted) heartbeats instead of during handshake
+  - evades Snort IDS rules
+  - loops making repeated requests (`-l <loopcount>`)
+  - dumps binary data to file (`-f <filename>`)
+  - IPv4 or IPv6 (`-v <IPver>`)
+  - full 64k heartbleeds
+  
+
+#Building#
+
+This is tricky. This uses the `ssl3_write_bytes()` function in order to send
+heartbeats encrypted after the SSL handshake is complete. This function is
+sometimes exported in OpenSSL libraries, and sometimes not.
+
+If that's the trouble, then you have to download and build OpenSSL, then
+link this tool with their object files. I did this by doing:
+
+  git clone git://git.openssl.org/openssl.git
+  cd openssl
+  ./config
+  make depend
+  make
+
+  gcc ../heartleech/heartleech.c *.a -ldl -lssl -o heartleech
+  
+This is evil, because I'm simultaneously linking to the local libraries
+and the system libraries for OpenSSL, but it seems to work without
+too much trouble.
+
+#Running#
+
+Run like the following:
+
+  ./heartleech -t www.cloudflarechallenge.com -f challenge.bin -l 1000000
+  
+This will send a million heartbeat requests to the server, which by the way will
+create a 64-gigabyte file, since each heartbeet is 64k in size. You can then
+grep that file for private keys and such.
 
 
-#Description#
+#Discussion#
 
+This should be a useful tool on its own, but I wrote it primarily because the
+pattern-matching rules for Snort are inadequate. IDS vendors won't fix their
+stuff until I can prove they are inadequate.
 
-A lot of people are confused by the widely circulated test scripts that send the
-following pattern in a packet:
+The problem with the signatures is that they trigger on the heartbeat pattern
+as the start of the TCP payload, looking for a pattern like this:
 
   `18 03 02 00 03 01 40 00`
-  
-This is the basis for Snort/EmergingThreats signatures. It's the basis for wild
-speculation that nefarious actors were exploiting this vulnerability before
-it was disclosed on the Monday. An example is this article from EFF:
-  
-  https://www.eff.org/deeplinks/2014/04/wild-heart-were-intelligence-agencies-using-heartbleed-november-2013
-  
-Likewise, a lot of people are confused by error messages in their server logs
-about SSL sessions being aborted during handshake. This is an artifact of lots
-of tools. For example, my `masscan` port scanner causes that during a normal
-SSL banner check.
+
+However, TCP is a not a "packet" protocol but a "streaming" protocol. While
+this bytes may be typically at the start of the TCP payload, they don't have
+to be.
+
+Therefore, I created this tool such that these bytes don't appear at the
+start of a packet's payload. Instead, they appear in the middle.
+
+The IDSs look for these patterns both coming from the attacker and also
+coming from the server. Therefore, I have to manipulate both sides of the 
+connection in roder to cause the evasion.
+
+I do this on the client side by sending an HTTP GET request back-to-back with
+a heartbeat requests. This was the most difficult part of the program. Normally,
+with an SSL API, you let the underlying library take care of network/sockets
+communications for you. However, that creates two separate TCP packets on the
+wire when I want just one packet with two SSL records. Therefore, I had to
+use my own sockets communiations, then use the OpenSSL "memory BIO" feature
+to encrypt/decrypt data separately. There's not a log of documentation on how
+to do this, so it took a while to get it to work.
+
+On the server side, the replies natureally come back together. I havne't tested
+anywhere by the CloudFlare challenge server, but I think this should almost
+always be the case. My looks for |18 03| as the packet header and warns you
+when this isn't the case.
 
 
-Had anybody been exploiting the bug early, before Monday's public announcement,
-it's unlikely they would have been doing things this way. A far easier way is the
-method demonstrated in this program, which doesn't generate the above pattern
-or log file entries.
+#IDS References#
 
-The technique is to grab the OpenSSL library and do a custom build. Go into the
-file `t1_lib.c` and change line# 2671 like the following:
-
-  `- 	s2n(payload, p);`
-  
-  `+  s2n(0x4444, p);`
-
-In this example, `0x4444` is the number I've chosen arbitrarily as the number
-of bytes I want to get back, which is about 16kilobytes.
-
-Once you've made that change to the OpenSSL build, then link the attached C
-program. All this program does is establish a normal session, then send a heartbeat,
-then dump the hex of the heartbeat message.
-
-The thing with this program is that it does the heartbeat AFTER the handshake has
-completed, so it won't produce those log messages. Also, while the fact this is 
-a hearbeat is still exposed view SSL's "record" header, the contents are encrypted,
-giving fewer bytes for an IDS to trigger on.
-
-If you look at the bytes sent, you'll now see something like the following on the
-request, where the bytes afterwards are encrypted and therefore meaningless:
-
-  `18 03 03 00 3d`
-  
-On the response side, you'll see something like the following:
-
-  `18 03 03 44 5C`
-  
-The problem here is that there aren't really enough bytes here for an IDS to pattern-match
-on. The final two bytes are "length" field and can be arbitrarly chosen by a hacker, especially
-if they want to evade an IDS. That leaves only the first three bytes being meaningful,
-and they'll false positive in about one in 4-million SSL packets -- which on a busy network
-would be quite often.
-
-The only way to properly detect this for an IDS is to do a stateful protocol-analysis instead
-of a pattern-match. A demonstration of this is in `masscan` which does a full SSL decode in
-order to detect this issue (albeit with a truncated SSL stack). The `masscan` state-machine
-decoders can easily be copied into an IDS.
-
-As for conspiracy theories about early exploitation, this is the sort of program I would have
-written, and I assume it's the sort of program that any competent organization (e.g. the NSA)
-would have writtent to exploit this bug. Therefore, if you are seeing things that look like
-current patterns that happened months ago, I'm betting it's false positives and not real
-exploitation.
-
-#Snort#
-
-Since posting this, people have told me about the following blog from Snort's VRT team:
+Here are some IDS links to the signatures in question
 
     http://vrt-blog.snort.org/2014/04/performing-heartbleed-attack-after-tls.html?utm_source=twitterfeed&utm_medium=twitter
 
-Firstly, this shows exactly my point: early exploiters would've (probably) have done
-their attacks AFTER the handshake, not before.
 
-Secondly, while their signatures are better than EmergingThreat signatures, they
-aren't sufficient. They solve the inherent false positive problem by adding
-"threshold" rules, so they only trigger when people do a lot of heartbeats. It's 
-valid from one stance, but invalid from another.
-
-The proper way to detect this is with a deterministic protocol decode that KNOWS
-that this is a heartbeat, and which extracts the length, not one that matches
-patterns in packets.
-
-
-
-#Others#
+#Other scripts#
 
 Other people have different programs that do similar things to this:
 
