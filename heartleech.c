@@ -80,6 +80,7 @@ int is_debug = 0;
  * Arguments for the heartbleed callback function
  */
 struct DumpArgs {
+    unsigned is_alert;
     FILE *fp;
     const char *filename;
     const char *hostname;
@@ -140,7 +141,8 @@ dump_bytes(int write_p, int version, int content_type,
     case 256: /* ???? why this? */
         return;
     case SSL3_RT_ALERT: /* 21 */
-        printf("[-] ALERT\n");
+        ERROR_MSG("[-] ALERT\n");
+        dumpargs->is_alert = 1;
         return;
     case TLS1_RT_HEARTBEAT:
         break; /* handle below */
@@ -244,6 +246,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     char *http_request;
     size_t total_bytes = 0;
     char port[6];
+    time_t started;
     
     /*
      * Format the HTTP request. We need to stick the "Host:" header in
@@ -336,7 +339,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     SSL_set_connect_state(ssl);
     SSL_set_msg_callback(ssl, dump_bytes);
     SSL_set_msg_callback_arg(ssl, (void*)args);
-
+    args->is_alert = 0;
     
     
     /* 
@@ -475,10 +478,17 @@ again:
      * "dump_bytes" function will happen.
      */
     DEBUG_MSG("[ ] waiting for response\n");
+    started = time(0);
     for (;;) {
         char buf[65536];
         struct timeval tv;
         fd_set readset;
+
+        if (args->is_alert)
+            break;
+        
+        if (started + 5 < time(0))
+            break;
 
         /* Use 'select' to poll to see if there is data waiting for us
          * from the network */
