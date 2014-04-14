@@ -3,6 +3,7 @@ heartleech
 
 A typical "heartbleed" tool. What makes this different is:
 
+  - autopwn most (`-a`) that does all the steps neeeded to get private key
   - post-handshake (encrypted) heartbeats instead of during handshake
   - evades Snort IDS rules
   - loops making repeated requests (`-l <loopcount>`)
@@ -32,15 +33,24 @@ This is evil, because I'm simultaneously linking to the local libraries
 and the system libraries for OpenSSL, but it seems to work without
 too much trouble.
 
+
 #Running#
 
 Run like the following:
 
-    ./heartleech -t www.cloudflarechallenge.com -f challenge.bin -l 1000000
+    ./heartleech www.cloudflarechallenge.com -f challenge.bin
   
 This will send a million heartbeat requests to the server, which by the way will
 create a 64-gigabyte file, since each heartbeet is 64k in size. You can then
-grep that file for private keys and such.
+grep that file for cookies, keys, and so on.
+
+Or, run like the following
+
+    ./heartleech www.cloudflarechallenge.com -a
+    
+This will automatically search the contents looking for prime factors for RSA
+keys, and if found, rebuilds the private key file for you and exits. Doesn't
+work with non-RSA keys.
 
 
 #Discussion#
