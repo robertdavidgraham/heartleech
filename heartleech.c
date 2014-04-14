@@ -926,8 +926,13 @@ usage:
 
         /* All parameters start with the standard '-' */
         if (argv[i][0] != '-') {
-            fprintf(stderr, "%s: unknown option\n", argv[i]);
-            goto usage;
+            if (args.hostname == NULL) {
+                args.hostname = argv[i];
+                continue;
+            } else {
+                fprintf(stderr, "%s: unknown option\n", argv[i]);
+                goto usage;
+            }
         }
 
         /* 
