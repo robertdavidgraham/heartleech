@@ -27,7 +27,7 @@ link this tool with their object files. I did this by doing:
     make depend
     make
 
-    gcc ../heartleech/heartleech.c *.a -ldl -lssl -o heartleech
+    gcc ../heartleech/heartleech.c libcrypto.a libssl.a -ldl -o heartleech
   
 This is evil, because I'm simultaneously linking to the local libraries
 and the system libraries for OpenSSL, but it seems to work without
