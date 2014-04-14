@@ -1,6 +1,6 @@
 /*
     
-    HEARLEECH
+    HEARTLEECH
 
     A program for exploiting Neel Mehta's "HeartBleed" bug. This program has
     the following features:
