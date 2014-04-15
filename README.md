@@ -44,7 +44,7 @@ Run like the following:
     ./heartleech www.cloudflarechallenge.com -f challenge.bin
   
 This will send a million heartbeat requests to the server, which by the way will
-create a 64-gigabyte file, since each heartbeet is 64k in size. You can then
+create a 64-gigabyte file, since each heartbeat is 64KB in size. You can then
 grep that file for cookies, keys, and so on.
 
 Or, run like the following
@@ -76,28 +76,28 @@ start of a packet's payload. Instead, they appear in the middle.
 
 The IDSs look for these patterns both coming from the attacker and also
 coming from the server. Therefore, I have to manipulate both sides of the 
-connection in roder to cause the evasion.
+connection in order to cause the evasion.
 
 I do this on the client side by sending an HTTP GET request back-to-back with
-a heartbeat requests. This was the most difficult part of the program. Normally,
+a heartbeat request. This was the most difficult part of the program. Normally,
 with an SSL API, you let the underlying library take care of network/sockets
 communications for you. However, that creates two separate TCP packets on the
 wire when I want just one packet with two SSL records. Therefore, I had to
 use my own sockets communications, then use the OpenSSL "memory BIO" feature
-to encrypt/decrypt data separately. There's not a log of documentation on how
+to encrypt/decrypt data separately. There's not a lot of documentation on how
 to do this, so it took a while to get it to work.
 
 On the server side, the replies naturally come back together. I haven't tested
-anywhere by the CloudFlare challenge server, but I think this should almost
-always be the case. My looks for |18 03| as the packet header and warns you
-when this isn't the case.
+anywhere but the CloudFlare challenge server, but I think this should almost
+always be the case. My tool looks for |18 03| as the packet header and warns you
+when this is the case.
 
 
 #IDS References#
 
 Here are some IDS links to the signatures in question
 
-    http://vrt-blog.snort.org/2014/04/performing-heartbleed-attack-after-tls.html?utm_source=twitterfeed&utm_medium=twitter
+    http://vrt-blog.snort.org/2014/04/performing-heartbleed-attack-after-tls.html
 
 
 #Other scripts#
