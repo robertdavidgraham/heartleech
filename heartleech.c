@@ -276,7 +276,7 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
 
     /*
      * n - modulus (should be same as original cert, but we
-     * recalcualte it here 
+     * recalculate it here 
      */
     rsa->n = BN_new();
     BN_mul(rsa->n, rsa->p, rsa->q, ctx);
@@ -338,7 +338,7 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
 
     ctx = BN_CTX_new();
 
-    /* Go foward one byte at a time through the buffer */
+    /* Go forward one byte at a time through the buffer */
     for (i=0; i<buf_length-prime_length; i++) {
 
         /* Grab a possible little-endian prime number from the buffer.
@@ -355,7 +355,7 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
         if (!(p.d[0]&1))
             continue;
 
-        /* [optimizaiton] Make sure the top bits aren't zero. Firstly,
+        /* [optimization] Make sure the top bits aren't zero. Firstly,
          * this won't be true for the large primes in question. Secondly,
          * a lot of bytes in dumps are zeroed out, causing this condition
          * to be true a lot. Not only does this quickly weed out target
@@ -432,7 +432,7 @@ process_bleed(struct DumpArgs *args)
  * Parse details from a certificate. We use this in order to grab
  * the 'modulus' from the certificate in order to crack it with
  * patterns found in memory. This is called in two places. One is when
- * we get the certificate from the server when conneting to it.
+ * we get the certificate from the server when connecting to it.
  * The other is offline cracking from files.
  ****************************************************************************/
 void
@@ -686,7 +686,7 @@ again:
     }
 
     /* 
-     * Send the HTTP request (encrypte) and Heartbeat request. This causes
+     * Send the HTTP request (encrypt) and Heartbeat request. This causes
      * the hearbeat request to happen at the end of the packet instead of the
      * front, thus evading pattern-match IDS
      */
@@ -833,7 +833,7 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
     }
     cert = PEM_read_X509(fp, NULL, NULL, NULL);
 	if (cert == NULL) {
-		fprintf(stderr, "%s: error parsing certifiate\n", filename_cert);
+		fprintf(stderr, "%s: error parsing certificate\n", filename_cert);
 		fclose(fp);
 		return;
 	}
