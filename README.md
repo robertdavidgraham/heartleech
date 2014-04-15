@@ -1,7 +1,7 @@
 heartleech
 ==========
 
-A typical "heartbleed" tool. What makes this different is:
+A typical "heartbleed" tool. What makes heartleech different is:
 
   - autopwn most (`-a`) that does all the steps needed to get private key
   - post-handshake (encrypted) heartbeats instead of during handshake
@@ -14,7 +14,7 @@ A typical "heartbleed" tool. What makes this different is:
 
 #Building#
 
-This is tricky. This uses the `ssl3_write_bytes()` function in order to send
+This is tricky. heartleech uses the `ssl3_write_bytes()` function in order to send
 heartbeats encrypted after the SSL handshake is complete. This function is
 sometimes exported in OpenSSL libraries, and sometimes not.
 
@@ -55,7 +55,7 @@ work with non-RSA keys.)
 
 #Discussion#
 
-This should be a useful tool on its own, but I wrote it primarily because the
+heartleech should be a useful tool on its own, but I wrote it primarily because the
 pattern-matching rules for Snort are inadequate. IDS vendors won't fix their
 stuff until I can prove they are inadequate.
 
