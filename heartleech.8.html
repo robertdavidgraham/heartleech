@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv='content-type' value='text/html;charset=utf8'>
+  <meta name='generator' value='Ronn/v0.7.3 (http://github.com/rtomayko/ronn/tree/0.7.3)'>
+  <title>heartleech(8) - Exploits OpenSSL heartbleed vulnerability</title>
+  <style type='text/css' media='all'>
+  /* style: man */
+  body#manpage {margin:0}
+  .mp {max-width:100ex;padding:0 9ex 1ex 4ex}
+  .mp p,.mp pre,.mp ul,.mp ol,.mp dl {margin:0 0 20px 0}
+  .mp h2 {margin:10px 0 0 0}
+  .mp > p,.mp > pre,.mp > ul,.mp > ol,.mp > dl {margin-left:8ex}
+  .mp h3 {margin:0 0 0 4ex}
+  .mp dt {margin:0;clear:left}
+  .mp dt.flush {float:left;width:8ex}
+  .mp dd {margin:0 0 0 9ex}
+  .mp h1,.mp h2,.mp h3,.mp h4 {clear:left}
+  .mp pre {margin-bottom:20px}
+  .mp pre+h2,.mp pre+h3 {margin-top:22px}
+  .mp h2+pre,.mp h3+pre {margin-top:5px}
+  .mp img {display:block;margin:auto}
+  .mp h1.man-title {display:none}
+  .mp,.mp code,.mp pre,.mp tt,.mp kbd,.mp samp,.mp h3,.mp h4 {font-family:monospace;font-size:14px;line-height:1.42857142857143}
+  .mp h2 {font-size:16px;line-height:1.25}
+  .mp h1 {font-size:20px;line-height:2}
+  .mp {text-align:justify;background:#fff}
+  .mp,.mp code,.mp pre,.mp pre code,.mp tt,.mp kbd,.mp samp {color:#131211}
+  .mp h1,.mp h2,.mp h3,.mp h4 {color:#030201}
+  .mp u {text-decoration:underline}
+  .mp code,.mp strong,.mp b {font-weight:bold;color:#131211}
+  .mp em,.mp var {font-style:italic;color:#232221;text-decoration:none}
+  .mp a,.mp a:link,.mp a:hover,.mp a code,.mp a pre,.mp a tt,.mp a kbd,.mp a samp {color:#0000ff}
+  .mp b.man-ref {font-weight:normal;color:#434241}
+  .mp pre {padding:0 4ex}
+  .mp pre code {font-weight:normal;color:#434241}
+  .mp h2+pre,h3+pre {padding-left:0}
+  ol.man-decor,ol.man-decor li {margin:3px 0 10px 0;padding:0;float:left;width:33%;list-style-type:none;text-transform:uppercase;color:#999;letter-spacing:1px}
+  ol.man-decor {width:100%}
+  ol.man-decor li.tl {text-align:left}
+  ol.man-decor li.tc {text-align:center;letter-spacing:4px}
+  ol.man-decor li.tr {text-align:right;float:right}
+  </style>
+</head>
+<!--
+  The following styles are deprecated and will be removed at some point:
+  div#man, div#man ol.man, div#man ol.head, div#man ol.man.
+
+  The .man-page, .man-decor, .man-head, .man-foot, .man-title, and
+  .man-navigation should be used instead.
+-->
+<body id='manpage'>
+  <div class='mp' id='man'>
+
+  <div class='man-navigation' style='display:none'>
+    <a href="#NAME">NAME</a>
+    <a href="#SYNOPSIS">SYNOPSIS</a>
+    <a href="#DESCRIPTION">DESCRIPTION</a>
+    <a href="#OPTIONS">OPTIONS</a>
+    <a href="#SIMPLE-EXAMPLES">SIMPLE EXAMPLES</a>
+    <a href="#IDS-EVASION">IDS EVASION</a>
+    <a href="#SEE-ALSO">SEE ALSO</a>
+    <a href="#AUTHORS">AUTHORS</a>
+  </div>
+
+  <ol class='man-decor man-head man head'>
+    <li class='tl'>heartleech(8)</li>
+    <li class='tc'></li>
+    <li class='tr'>heartleech(8)</li>
+  </ol>
+
+  <h2 id="NAME">NAME</h2>
+<p class="man-name">
+  <code>heartleech</code> - <span class="man-whatis">Exploits OpenSSL heartbleed vulnerability</span>
+</p>
+
+<h2 id="SYNOPSIS">SYNOPSIS</h2>
+
+<p>heartleech <var>host</var> [-p<var>port</var>] [-f<var>filename</var>] [-a]
+heartleech -F<var>filename</var> -c<var>certficate</var></p>
+
+<h2 id="DESCRIPTION">DESCRIPTION</h2>
+
+<p><strong>heartleech</strong> exploits the well-known "heartbleed" bug in OpenSSL-1.0.1f.
+It has a number of features that improve over other heartbleed exploits,
+such as automatically extracting the SSL private-key (autopwn).</p>
+
+<h2 id="OPTIONS">OPTIONS</h2>
+
+<ul>
+<li><p><code>&lt;host></code>: the target's name, IPv4 address, or IPv6 address.</p></li>
+<li><p><code>-p &lt;port></code>: the port number to connect to on the target machine. If not
+specified, the port number 443 will be used.</p></li>
+<li><p><code>-f &lt;filename></code>: the file where bleeding information is stored. Typically,
+the user will use this program to grab data from a server, then use
+other tools to search those files for things, such as cookies, passwords,
+and private strings.</p></li>
+<li><p><code>-a</code>: sets "auto-pwn" mode, which automatically searches the bleeding
+buffers for the private-key. If the private-key is found, it will be
+printed to <var>stdout</var>, and the program will exit.</p></li>
+<li><p><code>-F</code>: instead of running live against a server, this option causes
+the program to run forensics on existing files, looking for private
+keys. The option <code>-c</code> must also be used.</p></li>
+<li><p><code>-c</code>: in offline mode, this option tells the program the certificate to
+load. A certificate, containing the public-key, is needed in order to
+search data for the matching components of a private key. In online
+mode, this option isn't necessary, because the certificate is fetched
+from the server duing the SSL handshake.</p></li>
+<li><p><code>-d</code>: sets the 'debug' flag, which causes a lot of debug information to
+be printed to <var>stderr</var>. Using this will help diagnose connection problems.</p></li>
+<li><p><code>-v &lt;ipver></code>: sets the version of IP to use, either 4 for IPv4 or 6 for
+IPv6. Otherwise, the program tries to guess from the address given,
+or chooses whichever is first when doing a DNS lookup.</p></li>
+<li><p><code>-S</code>: randomizes the size of heartbleed requests. Normally, the program
+requests for the max 64k size, but with this setting, each request
+will have a random size between 200 and 64k. Some believe that heartbeats
+of different size will produce different results.</p></li>
+<li><p><code>-l &lt;count></code>: the number of times to loop and try a heartbeat again. The
+default count is 1000000 (one-million). A count of 1 grabs just a single
+heartbeat.</p></li>
+</ul>
+
+
+<h2 id="SIMPLE-EXAMPLES">SIMPLE EXAMPLES</h2>
+
+<p>The following is the easiest way to use the program, to grab the private-key
+form the server in 'auto-pwn' mode:</p>
+
+<pre><code>$ heartleech www.example.com -a
+</code></pre>
+
+<p>This auto-pwn mode will search for the heartbeat payloads looking for the
+components of the private-key that matches the server's certificate (which
+it automatically retrieves). When a certificate is found, it's printed to
+<var>stdout</var>. The user can then copy it to a file and use it for anythign that
+private-keys can be used for.</p>
+
+<p>Heartbleed information contains more than just private keys. On a typical
+web-server, it'll contain session cookies (useful for sidejacking) and
+passwords. In that case, the way to use this program is to save all the
+heartbleed information into a file. Note that these files quickly grow
+to gigabytes in size:</p>
+
+<pre><code>$ heartleech www.example.com -f bleed.bin
+&lt;ctrl-c>
+$ grep -iobUaP "Cookie:.*\n" bleed.bin
+</code></pre>
+
+<h2 id="IDS-EVASION">IDS EVASION</h2>
+
+<p>Soon after the Heartbleed vulnerability was announced, many people published
+'rules' for Snort-like intrusion-detection engines. These rules all trigger
+on the pattern |18 03| in the first two bytes of the TCP payloads.</p>
+
+<p>By default, this program avoids putting that pattern in the first two bytes.
+Instead, it tries to put those bytes elsewhere in the payload. Thus, this
+program should genrally avoid that sort of detection.</p>
+
+<p>Note that this isn't complete IDS evasion. The open-source Bro program,
+and many commercial products, do a full SSL protocol decode, and therefore
+catch this exploit no matter where it is in the packet. Also, by the time
+you read this, it's probable that the Snort-like engines will have upgraded
+their code to support SSL decodes as well.</p>
+
+<h2 id="SEE-ALSO">SEE ALSO</h2>
+
+<p><span class="man-ref">masscan<span class="s">(8)</span></span></p>
+
+<h2 id="AUTHORS">AUTHORS</h2>
+
+<p>This tool was written by Robert Graham. The source code is available at
+https://github.com/robertdavidgraham/heartbleed</p>
+
+
+  <ol class='man-decor man-foot man foot'>
+    <li class='tl'></li>
+    <li class='tc'>April 2014</li>
+    <li class='tr'>heartleech(8)</li>
+  </ol>
+
+  </div>
+</body>
+</html>

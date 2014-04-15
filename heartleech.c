@@ -61,8 +61,8 @@
  * function that is normally not exposed in include files, so
  * that we can format our 'bleed' manually.
  */
-#include <openssl/bio.h>
 #include <openssl/ssl.h>
+#include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/rsa.h>
 

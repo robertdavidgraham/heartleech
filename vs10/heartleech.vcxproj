@@ -76,8 +76,8 @@
     <LinkIncremental>true</LinkIncremental>
     <OutDir>..\bin\</OutDir>
     <IntDir>..\tmp\</IntDir>
-    <IncludePath>..\..\openssl64\include;$(IncludePath)</IncludePath>
-    <LibraryPath>..\..\openssl64\out32;$(LibraryPath)</LibraryPath>
+    <IncludePath>..\..\openssl64\inc32;$(IncludePath)</IncludePath>
+    <LibraryPath>..\..\openssl64\out32.dbg;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
