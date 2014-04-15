@@ -68,6 +68,10 @@
 
 int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 
+#ifndef TLS1_RT_HEARTBEAT
+#define TLS1_RT_HEARTBEAT 24
+#endif
+
 /*
  * Stand C includes
  */
@@ -314,7 +318,8 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
  * of the public key
  ****************************************************************************/
 int
-find_private_key(const BIGNUM *n, const BIGNUM *e, const unsigned char *buf, size_t buf_length)
+find_private_key(const BIGNUM *n, const BIGNUM *e, 
+                 const unsigned char *buf, size_t buf_length)
 {
     size_t i;
     int prime_length = n->top * sizeof(BN_ULONG);
@@ -440,7 +445,8 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
     subj = X509_get_subject_name(cert);
     if (subj) {
         int len;
-        len = X509_NAME_get_text_by_NID(subj, NID_commonName, name, sizeof(name));
+        len = X509_NAME_get_text_by_NID(subj, NID_commonName, 
+                                        name, 512);
         if (len > 0) {
             name[255] = '\0';
             DEBUG_MSG("[+] servername = %s\n", name);
@@ -454,7 +460,8 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
         BIGNUM *n = rsakey->pkey.rsa->n;
         memcpy(modulus, n, sizeof(*modulus));
         memcpy(e, rsakey->pkey.rsa->e, sizeof(*e));
-        DEBUG_MSG("[+] RSA public-key length = %u-bits\n", n->top*4*8);
+        DEBUG_MSG("[+] RSA public-key length = %u-bits\n", 
+                                    n->top * sizeof(BN_ULONG) * 8);
     }
 }
 
