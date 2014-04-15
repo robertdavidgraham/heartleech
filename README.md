@@ -80,11 +80,11 @@ a heartbeat requests. This was the most difficult part of the program. Normally,
 with an SSL API, you let the underlying library take care of network/sockets
 communications for you. However, that creates two separate TCP packets on the
 wire when I want just one packet with two SSL records. Therefore, I had to
-use my own sockets communiations, then use the OpenSSL "memory BIO" feature
+use my own sockets communications, then use the OpenSSL "memory BIO" feature
 to encrypt/decrypt data separately. There's not a log of documentation on how
 to do this, so it took a while to get it to work.
 
-On the server side, the replies natureally come back together. I havne't tested
+On the server side, the replies naturally come back together. I haven't tested
 anywhere by the CloudFlare challenge server, but I think this should almost
 always be the case. My looks for |18 03| as the packet header and warns you
 when this isn't the case.
