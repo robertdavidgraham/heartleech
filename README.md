@@ -3,7 +3,7 @@ heartleech
 
 A typical "heartbleed" tool. What makes this different is:
 
-  - autopwn most (`-a`) that does all the steps neeeded to get private key
+  - autopwn most (`-a`) that does all the steps needed to get private key
   - post-handshake (encrypted) heartbeats instead of during handshake
   - evades Snort IDS rules
   - loops making repeated requests (`-l <loopcount>`)
