@@ -381,7 +381,6 @@ find_private_key(const BIGNUM *n, const BIGNUM *e, const unsigned char *buf, siz
         }
     }
 
-    //BN_free(&p);
     BN_free(&dv);
     BN_free(&rem);
     BN_CTX_free(ctx);
@@ -390,6 +389,11 @@ find_private_key(const BIGNUM *n, const BIGNUM *e, const unsigned char *buf, siz
 }
 
 /****************************************************************************
+ * After reading a chunk of data, this function will process that chunk.
+ * There are three things we might do with that data:
+ *  1. save to a file for later offline processing
+ *  2. search for private key
+ *  3. hexdump to the command-line
  ****************************************************************************/
 void
 process_bleed(struct DumpArgs *args)
@@ -432,6 +436,7 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
     X509_NAME *subj;
     EVP_PKEY *rsakey;
 
+    /* we grab the server's name for debugging perposes */
     subj = X509_get_subject_name(cert);
     if (subj) {
         int len;
@@ -442,6 +447,8 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
         }
     }
 
+    /* we grab the 'modulus' (n) and the 'public exponenet' (e) for use
+     * with private key search in the data */
     rsakey = X509_get_pubkey(cert);
     if (rsakey && rsakey->type == 6) {
         BIGNUM *n = rsakey->pkey.rsa->n;
@@ -793,7 +800,6 @@ end:
     }
     return 0;
 }
-
 
 /****************************************************************************
  * Process the files produced by this tool, or other tools, looking for
