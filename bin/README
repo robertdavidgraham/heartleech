@@ -1,0 +1,15 @@
+This directory contains some pre-built binaries. Building from scratch
+is a pain, because sometimes standard OpenSSL libraries don't export
+the 'ssl3_write_bytes()" function needed to create the the Heartbeat
+request. Therefore, I have to build OpenSSL, and link this program
+to it statically. Since OpenSSL is linked statically to these binaries,
+you don't otherwise need OpenSSL installed.
+
+The Windows program is 'bin/win32/heartleach.exe'. It should also
+run just fine on 64-bit windows.
+
+The 'bin/kali32/heartleech' binary is designed for the Linux distribution
+Kali/1.0.6 in 32-bit mode. It'll probably work on a wide range of other
+Linux systems on x86.
+
+
