@@ -529,7 +529,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      */
     snprintf(port, sizeof(port), "%u", args->port);
     DEBUG_MSG("[ ] resolving \"%s\"\n", hostname);
-    x =  getaddrinfo(hostname, "443", 0, &addr);
+    x =  getaddrinfo(hostname, port, 0, &addr);
     if (x != 0) {
         return ERROR_MSG("[-] %s: DNS lookup failed\n", hostname);
     } else if (is_debug) {
