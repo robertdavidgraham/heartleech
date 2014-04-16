@@ -96,6 +96,7 @@ struct DumpArgs {
     const char *filename;
     const char *hostname;
     const char *cert_filename;
+    const char *offline_filename;
     unsigned is_error;
     unsigned is_auto_pwn;
     unsigned is_rand_size;
@@ -975,7 +976,7 @@ usage:
             args.filename = arg;
             break;
         case 'F':
-            process_offline_file(args.cert_filename, arg);
+            args.offline_filename = arg;
             break;
         case 'l':
             args.loop_count = strtoul(arg, 0, 0);
@@ -1007,21 +1008,21 @@ usage:
             goto usage;
         }
     }
-    if (args.hostname == 0) {
+    if (args.hostname != 0) {
+        /*
+         * Now run the thread
+         */
+        while (args.loop_count) {
+            int x;
+            x = ssl_thread(args.hostname, &args);
+            if (x < 0)
+                break;
+        }
+    } else if (args.offline_filename != 0 && args.cert_filename != 0) {
+        process_offline_file(args.cert_filename, args.offline_filename);
+    } else {
         fprintf(stderr, "no target specified, use \"-t <hostname>\"\n");
         goto usage;
-    }
-
-    
-
-    /*
-     * Now run the thread
-     */
-    while (args.loop_count) {
-        int x;
-        x = ssl_thread(args.hostname, &args);
-        if (x < 0)
-            break;
     }
 
     /*
