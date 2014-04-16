@@ -28,13 +28,14 @@ link this tool with their object files. I did this by doing:
     make
 
     gcc ../heartleech/heartleech.c libcrypto.a libssl.a -ldl -o heartleech
-    
-    #Cygwin compile string, order matters:
-    gcc ../heartleech/heartleech.c libcrypto.a libssl.a -ldl -o heartleech
 
-This is evil, because I'm simultaneously linking to the local libraries
-and the system libraries for OpenSSL, but it seems to work without
-too much trouble.
+On Cygwin (and maybe other platforms), the order in which you link the libraries
+apparently matters, so do "libcrypto.a" first, then "libssl.a", then "-ldl".
+
+On Windows with VisualStudio, this is the guide I use for building:
+http://developer.covenanteyes.com/building-openssl-for-visual-studio/
+
+
 
 
 #Running#
