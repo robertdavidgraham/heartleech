@@ -1,0 +1,206 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		11A327D318FDCDC200142404 /* libssl.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 11A327D218FDCDC200142404 /* libssl.dylib */; };
+		11A327D518FDCDCB00142404 /* libcrypto.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 11A327D418FDCDCB00142404 /* libcrypto.dylib */; };
+		11A327DC18FDCE4600142404 /* heartleech.c in Sources */ = {isa = PBXBuildFile; fileRef = 11A327DB18FDCE4600142404 /* heartleech.c */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		11A327C118FDCCA900142404 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		11A327C318FDCCA900142404 /* heartleech */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = heartleech; sourceTree = BUILT_PRODUCTS_DIR; };
+		11A327D218FDCDC200142404 /* libssl.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libssl.dylib; path = usr/lib/libssl.dylib; sourceTree = SDKROOT; };
+		11A327D418FDCDCB00142404 /* libcrypto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcrypto.dylib; path = usr/lib/libcrypto.dylib; sourceTree = SDKROOT; };
+		11A327DB18FDCE4600142404 /* heartleech.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = heartleech.c; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		11A327C018FDCCA900142404 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11A327D518FDCDCB00142404 /* libcrypto.dylib in Frameworks */,
+				11A327D318FDCDC200142404 /* libssl.dylib in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		11A327B818FDCCA900142404 = {
+			isa = PBXGroup;
+			children = (
+				11A327DB18FDCE4600142404 /* heartleech.c */,
+				11A327D418FDCDCB00142404 /* libcrypto.dylib */,
+				11A327D218FDCDC200142404 /* libssl.dylib */,
+				11A327C418FDCCA900142404 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		11A327C418FDCCA900142404 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				11A327C318FDCCA900142404 /* heartleech */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		11A327C218FDCCA900142404 /* heartleech */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 11A327CD18FDCCA900142404 /* Build configuration list for PBXNativeTarget "heartleech" */;
+			buildPhases = (
+				11A327BF18FDCCA900142404 /* Sources */,
+				11A327C018FDCCA900142404 /* Frameworks */,
+				11A327C118FDCCA900142404 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = heartleech;
+			productName = heartleech;
+			productReference = 11A327C318FDCCA900142404 /* heartleech */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		11A327BA18FDCCA900142404 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0430;
+			};
+			buildConfigurationList = 11A327BD18FDCCA900142404 /* Build configuration list for PBXProject "heartleech" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = 11A327B818FDCCA900142404;
+			productRefGroup = 11A327C418FDCCA900142404 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				11A327C218FDCCA900142404 /* heartleech */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		11A327BF18FDCCA900142404 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				11A327DC18FDCE4600142404 /* heartleech.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		11A327CB18FDCCA900142404 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				COPY_PHASE_STRIP = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		11A327CC18FDCCA900142404 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_VERSION = com.apple.compilers.llvm.clang.1_0;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		11A327CE18FDCCA900142404 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		11A327CF18FDCCA900142404 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		11A327BD18FDCCA900142404 /* Build configuration list for PBXProject "heartleech" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				11A327CB18FDCCA900142404 /* Debug */,
+				11A327CC18FDCCA900142404 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		11A327CD18FDCCA900142404 /* Build configuration list for PBXNativeTarget "heartleech" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				11A327CE18FDCCA900142404 /* Debug */,
+				11A327CF18FDCCA900142404 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 11A327BA18FDCCA900142404 /* Project object */;
+}
