@@ -326,11 +326,11 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
     int prime_length = n->top * sizeof(BN_ULONG);
     BN_CTX *ctx;
     BIGNUM p;
-    BIGNUM dv;
-    BIGNUM rem;
+    BIGNUM q;
+    BIGNUM remainder;
 
-    BN_init(&dv);
-    BN_init(&rem);
+    BN_init(&q);
+    BN_init(&remainder);
     BN_init(&p);
 
     /* Need enough target data to hold at least one prime number */
@@ -367,8 +367,8 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
             continue;
 
         /* Do the division, grabbing the remainder */
-        BN_div(&dv, &rem, n, &p, ctx);
-        if (!BN_is_zero(&rem))
+        BN_div(&q, &remainder, n, &p, ctx);
+        if (!BN_is_zero(&remainder))
             continue;
 
         /* We have a match! Let's create an X509 certificate from this */
@@ -379,7 +379,7 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
             fprintf(stderr, "\n");
             BIO_set_fp(out,stdout,BIO_NOCLOSE);
 
-            rsa = rsa_gen(&p, &dv, e);
+            rsa = rsa_gen(&p, &q, e);
             PEM_write_bio_RSAPrivateKey(out, rsa, NULL, NULL, 0, NULL, NULL);
 
             /* the program doesn't need to continue */
@@ -387,8 +387,8 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
         }
     }
 
-    BN_free(&dv);
-    BN_free(&rem);
+    BN_free(&q);
+    BN_free(&remainder);
     BN_CTX_free(ctx);
 
     return 0;
