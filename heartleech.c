@@ -142,7 +142,7 @@ hexdump(const unsigned char *buf, size_t len)
     for (i=0; i<len; i += 16) {
         size_t j;
 
-        printf("%04x ", i);
+        printf("%04x ", (unsigned)i);
         for (j=i; j<len && j<i+16; j++) {
             printf("%02x ", buf[j]);
         }
@@ -893,7 +893,8 @@ main(int argc, char *argv[])
     if (argc <= 1 ) {
 usage:
         printf("\n");
-        printf("usage:\n heartleech -t<hostname> -f<filename> [-l<loops>] [-p<port>] [-v<IPver>]  ...\n");
+        printf("usage:\n heartleech -t<hostname> -f<filename> [-l<loops>]"
+               " [-p<port>] [-v<IPver>]  ...\n");
         printf(" <hostname> is a DNS name or IP address of the target\n");
         printf(" <filename> is where the binary heartbleed information is stored\n");
         printf(" <loops> is the number of repeated attempts to grab the informaiton\n");
@@ -901,6 +902,8 @@ usage:
         printf(" <IPver> is the IP version (4 or 6)\n");
         return 1;
     }
+    fprintf(stderr, "--- heartleech/1.0.0b ---\n");
+    fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n\n");
 
 
     /*
@@ -920,6 +923,14 @@ usage:
     ERR_load_BIO_strings();
     OpenSSL_add_all_algorithms();
 
+                   
+    if (SSLeay() < 0x01000100) {
+        ERROR_MSG("[-] heartbeats unsupported in local SSL library: %s\n",
+                  SSLeay_version(SSLEAY_VERSION));
+        ERROR_MSG("[-] must link to OpenSSL/1.0.1a or later\n");
+        exit(1);
+    }
+    
     /*
      * Parse the program options
      */
@@ -1011,6 +1022,8 @@ usage:
         fprintf(stderr, "no target specified, use \"-t <hostname>\"\n");
         goto usage;
     }
+    DEBUG_MSG("[+] local OpenSSL 0x%x(%s)\n", 
+              SSLeay(), SSLeay_version(SSLEAY_VERSION));
 
     
 
