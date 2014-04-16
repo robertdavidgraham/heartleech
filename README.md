@@ -105,3 +105,9 @@ Here are some IDS links to the signatures in question
 Other people have different programs that do similar things to this:
 
       https://raw.githubusercontent.com/HackerFantastic/Public/master/exploits/heartbleed.c
+      
+#CREDITS
+
+I go the idea for searching for primes in a tweet from Einar Otto Stangvik (@einaros).
+He probably got that idea from others, for example, Jeremi Gosney (@jmgosney) also successfully
+used the idea before I started coding it.
