@@ -925,7 +925,7 @@ again:
                 for (i=0; i<(size_t)x && buf[i] != '\n'; i++) {
                     if (buf[i] == '\r')
                         continue;
-                    if (isprint(buf[i])&0xFF)
+                    if (isprint(buf[i]&0xFF))
                         fprintf(stderr, "%c", buf[i]&0xFF);
                     else
                         fprintf(stderr, ".");
