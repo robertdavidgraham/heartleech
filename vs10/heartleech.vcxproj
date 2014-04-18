@@ -21,6 +21,9 @@
   <ItemGroup>
     <ClCompile Include="..\heartleech.c" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.md" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{5DC82CFB-59C4-4C85-8398-782E3CB9B653}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>

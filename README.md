@@ -243,4 +243,9 @@ Other people have different programs that do similar things to this:
 I go the idea for searching for primes in a tweet from Einar Otto Stangvik 
 (@einaros). He probably got that idea from others, for example, 
 Jeremi Gosney (@jmgosney) also successfully used the idea before I started 
-coding it.
+coding it. Here are some links:
+
+	https://gist.github.com/epixoip/10570627
+
+
+

