@@ -30,11 +30,12 @@ system) using the following steps:
     make depend
     make
 
-    gcc ../heartleech/heartleech.c libcrypto.a libssl.a -ldl -o heartleech
+    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -o heartleech
 
 On Cygwin (and maybe other platforms), the order in which you link the
 libraries apparently matters, so do "`libcrypto.a`" first, then "`libssl.a`", 
-then "`-ldl`".
+then "`-ldl`". Conversely, on Kali Linux, `libssl.a` must come before
+`libcrypto.a`.
 
 On Windows with VisualStudio, this is the guide I use for building:
     
