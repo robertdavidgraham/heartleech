@@ -1113,7 +1113,7 @@ usage:
          * -t www.google.com
          */
         c = argv[i][1];
-        if (c == 'd' || c == 'a')
+        if (c == 'd' || c == 'a' || c == 'S')
             ;
         else if (argv[i][2] == '\0') {
             arg = argv[++i];
