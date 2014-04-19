@@ -42,6 +42,7 @@
 #define snprintf _snprintf
 #define sleep(secs) Sleep(1000*(secs))
 #define WSA(err) (WSA##err)
+#define strdup _strdup
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -102,6 +103,44 @@ struct Connection {
 };
 
 /**
+ * The type of handshake to do, such as SMTP STARTTLS
+ */
+enum {
+    APP_NONE,
+    APP_FTP,
+    APP_SMTP,
+    APP_POP3,
+    APP_IMAP4,
+    APP_LDAP,
+    APP_NNTP,
+    APP_ACAP,
+    APP_POSTGRES,
+    APP_XMPP,
+};
+
+/**
+ * Default handshake types for some well-known ports
+ */
+struct Applications {
+    unsigned port;
+    int type;
+} default_handshakes[] = {
+    {  21, APP_FTP},
+    {  25, APP_SMTP},
+    { 110, APP_POP3},
+    { 143, APP_IMAP4},
+    { 389, APP_LDAP},
+    { 433, APP_NNTP},
+    { 587, APP_SMTP},
+    { 674, APP_ACAP},
+    {5222, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
+    {5269, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
+    {5432, APP_POSTGRES},
+    {0,0}
+};
+
+
+/**
  * Arguments for the heartbleed callback function. We read these from the
  * command line and pass them to the threads
  */
@@ -113,6 +152,7 @@ struct DumpArgs {
     const char *cert_filename;
     const char *offline_filename;
     unsigned timeout;
+    int handshake_type;
     unsigned is_error;
     unsigned is_auto_pwn;
     unsigned is_rand_size;
@@ -127,6 +167,10 @@ struct DumpArgs {
     unsigned long long total_bytes;
     BIGNUM n;
     BIGNUM e;
+    struct {
+        char *host;
+        unsigned port;
+    } proxy;
     unsigned char buf[70000];
 };
 
@@ -291,6 +335,42 @@ my_inet_ntop(struct sockaddr *sa, char *dst, size_t sizeof_dst)
     }
 #endif
     return dst;
+}
+
+
+
+/****************************************************************************
+ ****************************************************************************/
+static size_t
+my_inet_pton(const char *hostname, 
+                unsigned char *dst, size_t offset, size_t max,
+                unsigned char *type)
+{
+    struct sockaddr_in sin;
+    struct sockaddr_in6 sin6;
+    size_t len;
+
+    if (inet_pton(AF_INET, hostname, &sin)) {
+        if (offset + 4 <= max)
+            memcpy(&dst[offset], &sin.sin_addr, 4);
+        *type = 1; /* socks5 type = IPv4 */
+        return offset + 4;
+    }
+    
+    if (inet_pton(AF_INET6, hostname, &sin6)) {
+        if (offset + 16 <= max)
+            memcpy(&dst[offset], &sin6.sin6_addr, 16);
+        *type = 4; /* socks5 type = IPv6*/
+        return offset + 16;
+    }
+
+    len = strlen(hostname);
+    if (offset + len + 1 <= max) {
+        dst[offset] = (unsigned char)len;
+        memcpy(&dst[offset+1], hostname, len);
+    }
+    *type = 3; /*socks5 type = domainname */
+    return offset + len + 1;
 }
 
 
@@ -578,6 +658,148 @@ is_incoming_data(int fd)
 }
 
 
+/****************************************************************************
+ * Does the proxy connection. Currently, we only support Socks5n for
+ * use with Tor
+ ****************************************************************************/
+int
+proxy_handshake(int fd, struct DumpArgs *args)
+{
+    unsigned char foo[512];
+    unsigned offset;
+    char proxy_address[300] = "";
+    unsigned proxy_port = 0;
+    time_t start_time;
+    int x;
+
+    /* 
+     * negotiate version=5, passwords=none 
+     */
+    x = send(fd, "\x05\x01\x00", 3, 0);
+    if (x < 3) {
+        ERROR_MSG("[-] proxy handshake: %s (%u)\n", 
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+
+    /*
+     * read the negotiated response
+     */
+    start_time = time(0);
+    while (!is_incoming_data(fd)) {
+        if (start_time + args->timeout < time(0)) {
+            ERROR_MSG("[-] proxy handshake: timed out\n");
+            return -1;
+        }
+    }
+    x = recv(fd, (char*)foo, 2, 0);
+    if (x != 2) {
+        ERROR_MSG("[-] proxy handshake: %s (%u)\n", 
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+
+    /*
+     * Parse the response negotiation
+     */
+    if (foo[0] != 5) {
+        ERROR_MSG("[-] proxy handshake: not Socks5\n");
+        return -1;
+    }
+    if (foo[1] != 0) {
+        ERROR_MSG("[-] proxy handshake: requires authentication\n");
+        return -1;
+    }
+
+    /* 
+     * send connect requrest 
+     */
+    foo[0] = 5; /*version = socks5 */
+    foo[1] = 1; /*cmd = connect*/
+    foo[2] = 0; /*reserved*/
+    offset = my_inet_pton(args->hostname, foo, 4, sizeof(foo), &foo[3]);
+    if (offset + 2 < sizeof(foo)) {
+        foo[offset++] = (unsigned char)(args->port>>8);
+        foo[offset++] = (unsigned char)(args->port>>0);
+    }
+    x = send(fd, (char*)foo, offset, 0);
+    if (x != offset) {
+        ERROR_MSG("[-] proxied connect: %s (%u)\n", 
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+
+    /*
+     * Now check the reply to see if we've succeeded
+     */
+    start_time = time(0);
+    while (!is_incoming_data(fd)) {
+        if (start_time + args->timeout < time(0)) {
+            ERROR_MSG("[-] proxied connect: timed out\n");
+            return -1;
+        }
+    }
+    x = recv(fd, (char*)foo, sizeof(foo), 0);
+    if (x == 0) {
+        ERROR_MSG("[-] proxied connect: %s (%u)\n", 
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+
+    /*
+     * Parse the response
+     */
+    if (foo[0] != 5) {
+        ERROR_MSG("[-] proxied connect: corrupted result\n");
+        return -1;
+    }
+    if (foo[1] != 0) {
+        ERROR_MSG("[-] proxied connect: proxy error %u\n", foo[1]);
+        return -1;
+    }
+
+    switch (foo[3]) {
+    case 1: 
+        if (x != 10) {
+            ERROR_MSG("[-] proxy returned unexpected data\n");
+            return -1;
+        } else {
+            struct sockaddr_in sin;
+            sin.sin_family = AF_INET;
+            memcpy(&sin.sin_addr, foo+4, 4);
+            memcpy(&sin.sin_port, foo+8, 2);
+            my_inet_ntop((struct sockaddr*)&sin, proxy_address, sizeof(proxy_address));
+        }
+        break;
+    case 4:
+        if (x != 22) {
+            ERROR_MSG("[-] proxy returned unexpected data\n");
+            return -1;
+        } else {
+            struct sockaddr_in6 sin6;
+            sin6.sin6_family = AF_INET;
+            memcpy(&sin6.sin6_addr, foo+4, 4);
+            memcpy(&sin6.sin6_port, foo+8, 2);
+            my_inet_ntop((struct sockaddr*)&sin6, proxy_address, sizeof(proxy_address));
+        }
+        break;
+    case 3:
+        if (x < 7 || x != 7 + foo[4]) {
+            ERROR_MSG("[-] proxy returned unexpected data\n");
+            return -1;
+        } else {
+            memcpy(proxy_address, foo+5, foo[4]);
+            proxy_address[foo[4]] = '\0';
+        }
+    default:
+        ERROR_MSG("[-] proxy returned unexpected data\n");
+        return -1;
+    }
+
+    DEBUG_MSG("[+] proxy connected through: %s:%u\n", proxy_address, proxy_port);
+    return 0;
+}
+
 
 /****************************************************************************
  * This is the main threat that creates a TCP connection, negotiates
@@ -639,7 +861,19 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
                 strlen(prototype+prefix) + 1);
     }
 
-    
+    /*
+     * If we are doing a proxy, then switch the target hostname
+     * to that of the proxy
+     */
+    if (args->proxy.host) {
+        hostname = args->proxy.host;
+        snprintf(port, sizeof(port), "%u", args->proxy.port);
+    } else {
+        hostname = args->hostname;
+        snprintf(port, sizeof(port), "%u", args->port);
+    }
+
+
     
     /*
      * Do the DNS lookup. A hostname may have multiple IP addresses, so we
@@ -647,7 +881,6 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
      * the first address to use, but we allow the user to optionally
      * select the first IPv4 or IPv6 address with the -v option.
      */
-    snprintf(port, sizeof(port), "%u", args->port);
     DEBUG_MSG("[ ] resolving \"%s\"\n", hostname);
     x =  getaddrinfo(hostname, port, 0, &addr);
     if (x != 0) {
@@ -694,6 +927,19 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     }
     DEBUG_MSG("[+] %s: connected\n", address);
 
+
+    /*
+     * If doing a proxy, then do the SOCKS5N connect stuff
+     */
+    if (args->proxy.host) {
+        if (proxy_handshake(fd, args) == -1) {
+            ERROR_MSG("[-] proxy handshake failed\n");
+            if (args->loop.done == 0)
+                exit(1);
+            else
+                goto end;
+        }
+    }
     
     
     /* 
@@ -776,8 +1022,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
             goto end;
         }
     }
-    DEBUG_MSG("[+] %s:%s: SSL handshake complete [%s]\n", 
-                                        address, port, SSL_get_cipher(ssl));
+    DEBUG_MSG("[+] SSL handshake complete [%s]\n", SSL_get_cipher(ssl));
 
 
     /*
@@ -1034,6 +1279,81 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
 }
 
 
+/***************************************************************************
+ * Tests if the named parameter on the command-line. We do a little
+ * more than a straight string compare, because I get confused
+ * whether parameter have punctuation. Is it "--excludefile" or
+ * "--exclude-file"? I don't know if it's got that dash. Screw it,
+ * I'll just make the code so it don't care.
+ ***************************************************************************/
+static int
+EQUALS(const char *lhs, const char *rhs)
+{
+    for (;;) {
+        while (*lhs == '-' || *lhs == '.' || *lhs == '_')
+            lhs++;
+        while (*rhs == '-' || *rhs == '.' || *rhs == '_')
+            rhs++;
+        if (*lhs == '\0' && *rhs == '[')
+            return 1; /*arrays*/
+        if (*lhs == '\0' && *rhs == '=')
+            return 1; /*equals*/
+        if (*lhs == '\0' && *rhs == ':')
+            return 1; /*equals*/
+        if (tolower(*lhs & 0xFF) != tolower(*rhs & 0xFF))
+            return 0;
+        if (*lhs == '\0')
+            return 1;
+        lhs++;
+        rhs++;
+    }
+}
+
+/****************************************************************************
+ ****************************************************************************/
+unsigned
+heartleech_set_parameter(struct DumpArgs *args, 
+                            const char name[], const char value[])
+{
+    if (EQUALS("proxy", name)) {
+        unsigned port_index;
+        unsigned host_index = 0;
+        unsigned host_length;
+
+        /* Find port spec, if there is one */
+        if (value[0] == '[' && strchr(value, ']')) {
+            port_index = strchr(value, ']') - value;
+            host_index = 1;
+        } else if (strrchr(value, ':'))
+            port_index = strrchr(value, ':') - value;
+        else
+            port_index = strlen(value);
+        host_length = port_index - host_index;
+
+        /* allocate name for proxy host */
+        if (args->proxy.host) {
+            fprintf(stderr, "[-] proxy specified more than once\n");
+            free(args->proxy.host);
+        }
+        args->proxy.host = (char*)malloc(host_length + 1);
+        memcpy(args->proxy.host, &value[host_index], host_length + 1);
+        args->proxy.host[host_length] = '\0';
+
+        /* parse port */
+        while (value[port_index] && ispunct(value[port_index]&0xFF))
+            port_index++;
+        args->proxy.port = strtoul(&value[port_index], 0, 0);
+
+        if (args->proxy.port == 0 || args->proxy.port > 65535)
+            args->proxy.port = 9150; /* default for Tor */
+
+        return 1;
+    } else {
+        ERROR_MSG("[-] unknown parameter: %s\n", name);
+        exit(1);
+    }
+}
+
 
 /****************************************************************************
  ****************************************************************************/
@@ -1095,6 +1415,23 @@ usage:
     for (i=1; i<argc; i++) {
         char c;
         const char *arg;
+
+        /* --longform parameters */
+        if (argv[i][0] == '-' && argv[i][1] == '-') {
+            if (strchr(argv[i], '='))
+                arg = strchr(argv[i], '=') + 1;
+            else if (strchr(argv[i], ':'))
+                arg = strchr(argv[i], ':') + 1;
+            else {
+                if (i+1 < argc)
+                    arg = argv[i+1];
+                else
+                    arg = "";
+            }
+            if (heartleech_set_parameter(&args, argv[i], arg))
+                i++;
+            continue;
+        }
 
         /* All parameters start with the standard '-' */
         if (argv[i][0] != '-') {
