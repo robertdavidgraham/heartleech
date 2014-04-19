@@ -262,12 +262,22 @@ receive_heartbeat(int write_p, int version, int content_type,
 
 /****************************************************************************
  * Wrapper function for printing addresses, since the standard
- * "inet_ntop()" function doesn't process both addresses equally
+ * "inet_ntop()" function doesn't automatically grab the 'family' from
+ * the socket structure to begin with
  ****************************************************************************/
 static const char *
-my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
+my_inet_ntop(struct sockaddr *sa, char *dst, size_t sizeof_dst)
 {
-    switch (family) {
+#if defined(WIN32)
+    /* WinXP doesn't have 'inet_ntop()', but it does have another WinSock
+     * function that takes care of this for us */
+    {
+        DWORD len = (DWORD)sizeof_dst;
+        WSAAddressToStringA(sa, sizeof(struct sockaddr_in6), NULL,
+                            dst, &len);
+    }    
+#else
+    switch (sa->sa_family) {
     case AF_INET:
         inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr),
                 dst, sizeof_dst);
@@ -279,7 +289,7 @@ my_inet_ntop(int family, struct sockaddr *sa, char *dst, size_t sizeof_dst)
     default:
         dst[0] = '\0';
     }
-
+#endif
     return dst;
 }
 
@@ -645,7 +655,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
     } else if (is_debug) {
         struct addrinfo *a;
         for (a=addr; a; a = a->ai_next) {
-            my_inet_ntop(a->ai_family, a->ai_addr, address, sizeof(address));
+            my_inet_ntop(a->ai_addr, address, sizeof(address));
             DEBUG_MSG("[+]  %s\n", address);
         }
         DEBUG_MSG("\n");
@@ -656,7 +666,7 @@ ssl_thread(const char *hostname, struct DumpArgs *args)
         addr = addr->ai_next;
     if (addr == NULL)
         return ERROR_MSG("IPv%u address not found\n", args->ip_ver);
-    my_inet_ntop(addr->ai_family, addr->ai_addr, address, sizeof(address));
+    my_inet_ntop(addr->ai_addr, address, sizeof(address));
 
     
     
