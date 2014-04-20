@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		11A327D318FDCDC200142404 /* libssl.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 11A327D218FDCDC200142404 /* libssl.dylib */; };
-		11A327D518FDCDCB00142404 /* libcrypto.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 11A327D418FDCDCB00142404 /* libcrypto.dylib */; };
 		11A327DC18FDCE4600142404 /* heartleech.c in Sources */ = {isa = PBXBuildFile; fileRef = 11A327DB18FDCE4600142404 /* heartleech.c */; };
+		11B0B49319031D24004C2CCA /* libssl.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 11B0B49219031D24004C2CCA /* libssl.a */; };
+		11B0B49519031D35004C2CCA /* libcrypto.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 11B0B49419031D35004C2CCA /* libcrypto.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -26,9 +26,9 @@
 
 /* Begin PBXFileReference section */
 		11A327C318FDCCA900142404 /* heartleech */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = heartleech; sourceTree = BUILT_PRODUCTS_DIR; };
-		11A327D218FDCDC200142404 /* libssl.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libssl.dylib; path = usr/lib/libssl.dylib; sourceTree = SDKROOT; };
-		11A327D418FDCDCB00142404 /* libcrypto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcrypto.dylib; path = usr/lib/libcrypto.dylib; sourceTree = SDKROOT; };
 		11A327DB18FDCE4600142404 /* heartleech.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = heartleech.c; sourceTree = "<group>"; };
+		11B0B49219031D24004C2CCA /* libssl.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libssl.a; path = ../openssl/libssl.a; sourceTree = "<group>"; };
+		11B0B49419031D35004C2CCA /* libcrypto.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libcrypto.a; path = ../openssl/libcrypto.a; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -36,8 +36,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				11A327D518FDCDCB00142404 /* libcrypto.dylib in Frameworks */,
-				11A327D318FDCDC200142404 /* libssl.dylib in Frameworks */,
+				11B0B49519031D35004C2CCA /* libcrypto.a in Frameworks */,
+				11B0B49319031D24004C2CCA /* libssl.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -47,9 +47,9 @@
 		11A327B818FDCCA900142404 = {
 			isa = PBXGroup;
 			children = (
+				11B0B49419031D35004C2CCA /* libcrypto.a */,
+				11B0B49219031D24004C2CCA /* libssl.a */,
 				11A327DB18FDCE4600142404 /* heartleech.c */,
-				11A327D418FDCDCB00142404 /* libcrypto.dylib */,
-				11A327D218FDCDC200142404 /* libssl.dylib */,
 				11A327C418FDCCA900142404 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -167,7 +167,13 @@
 		11A327CE18FDCCA900142404 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = YES;
 				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)";
+				"HEADER_SEARCH_PATHS[arch=*]" = ../openssl/include;
+				LIBRARY_SEARCH_PATHS = (
+					../openssl,
+					"\"$(SRCROOT)/../openssl\"",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Debug;
@@ -175,6 +181,11 @@
 		11A327CF18FDCCA900142404 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = YES;
+				LIBRARY_SEARCH_PATHS = (
+					../openssl,
+					"\"$(SRCROOT)/../openssl\"",
+				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
