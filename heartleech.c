@@ -273,7 +273,9 @@ hexdump(const unsigned char *buf, size_t len)
             printf("   ");
 
         for (j=i; j<len && j<i+16; j++) {
-            if (isprint(buf[j]) && !isspace(buf[j]))
+            if (buf[j] == ' ')
+                printf("%c", buf[j]);
+            else if (isprint(buf[j]) && !isspace(buf[j]))
                 printf("%c", buf[j]);
             else
                 printf(".");
@@ -409,6 +411,39 @@ my_inet_ntop(struct sockaddr *sa, char *dst, size_t sizeof_dst)
 }
 
 
+/******************************************************************************
+ * WinXP doesn't have standard 'inet_pton' function, we put this work around
+ * here
+ ******************************************************************************/
+#if defined(WIN32)
+int
+x_inet_pton(int family, const char *hostname, struct sockaddr *sa)
+{
+    int sizeof_sa;
+    int x;
+
+    switch (family) {
+    case AF_INET: sizeof_sa = sizeof(struct sockaddr_in); break;
+    case AF_INET6: sizeof_sa = sizeof(struct sockaddr_in6); break;
+    default: sizeof_sa = sizeof(struct sockaddr); break;
+    }
+
+    x = WSAStringToAddressA(
+                (char*)hostname,
+                family,
+                NULL,
+                sa,
+                &sizeof_sa);
+
+    /* Windows and Unix function disagree on success/failure codes */
+    if (x == 0)
+        return 1;
+    else
+        return 0;
+}
+#define inet_pton x_inet_pton
+#endif
+
 
 /******************************************************************************
  * Parse a network address, converting the text form into a binary form.
@@ -424,14 +459,15 @@ my_inet_pton(const char *hostname,
     struct sockaddr_in6 sin6;
     size_t len;
 
-    if (inet_pton(AF_INET, hostname, &sin)) {
+
+    if (inet_pton(AF_INET, hostname, (struct sockaddr *)&sin) == 1) {
         if (offset + 4 <= max)
             memcpy(&dst[offset], &sin.sin_addr, 4);
         *type = 1; /* socks5 type = IPv4 */
         return offset + 4;
     }
     
-    if (inet_pton(AF_INET6, hostname, &sin6)) {
+    if (inet_pton(AF_INET6, hostname, (struct sockaddr *)&sin6) == 1) {
         if (offset + 16 <= max)
             memcpy(&dst[offset], &sin6.sin6_addr, 16);
         *type = 4; /* socks5 type = IPv6*/
