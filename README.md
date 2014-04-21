@@ -108,6 +108,50 @@ This will automatically fetch the certificate from the website, then continue
 downloading information until it finds a matching private key within the
 heartbleed information.
 
+This tool supports IPv6. It may actually be using IPv6 without you knowing,
+if the first response from a DNS query of a domain name is an IPv6 address,
+then it will use IPv6 to connection. If you want to force the tool to use
+one or the other, use "--ipv4" or "--ipv6" on the command-line.
+
+This tool support Tor Socks5n proxying. That means it sends the target domain
+name through Socks to the Tor servers, which will then resolve the DNS name
+for us. To enabled this use the `--proxy <hostname:port>` option. If the port
+is not specified, it defaults to 9150.
+
+This tool supports STARTTLS. It automatically chooses this when a port is 
+selected that requires STARTTL for SSL, such as port 25 for SMTP.
+
+This tool supports extensive disagnostics of the connection with the `-d` 
+option. Here is an example and the output:
+
+    ./heartleech --scan smtp.gmail.com:25 --proxy 10.20.30.156:9150 -d
+
+    --- heartleech/1.0.0e ---
+    from https://github.com/robertdavidgraham/heartleech
+
+    [ ] resolving "10.20.30.156"
+    [+]  10.20.30.156
+    [+]  10.20.30.156
+    [ ] 10.20.30.156: connecting...
+    [+] 10.20.30.156: connected
+    [+] proxy connected through: 0.0.0.0:0
+    [+] 220 mx.google.com ESMTP ct2sm59082475wjb.33 - gsmtp
+    [+] 250-mx.google.com at your service, [93.174.95.82]
+    [+] 250-SIZE 35882577
+    [+] 250-8BITMIME
+    [+] 250-STARTTLS
+    [+] 250-ENHANCEDSTATUSCODES
+    [+] 250 CHUNKING
+    [+] 220 2.0.0 Ready to start TLS
+    [+] SMTP STARTTLS engaged
+    [ ] SSL handshake started...
+    [+] SSL handshake complete [ECDHE-RSA-AES128-GCM-SHA256]
+    [+] servername = smtp.gmail.com
+    [+] RSA public-key length = 2048-bits
+    [-] target doesn't support heartbeats
+    smtp.gmail.com:25: SAFE
+
+
 
 #Design#
 
@@ -196,6 +240,7 @@ generates may not quite match the original one on the server. For example, I
 may reverse the order of `p` and `q`. Also, there are some optional fields.
 Regardless of whehther my found private-key matches the original one, it can
 be used in place of the original one.
+
 
 
 #Discussion#

@@ -1897,6 +1897,9 @@ static void
 add_target(struct TargetList *targets, const char *hostname)
 {
     struct Target *target;
+    unsigned port_index;
+    unsigned host_index = 0;
+    unsigned host_length;
     
     /* Expand the list to accomodate the new target */
     if (targets->count + 1 >= targets->max) {
@@ -1916,10 +1919,28 @@ add_target(struct TargetList *targets, const char *hostname)
     /* add the target */
     target = &targets->list[targets->count++];
     memset(target, 0, sizeof(*target));
+
+    /* parse for port info */
+    if (hostname[0] == '[' && strchr(hostname, ']')) {
+        port_index = strchr(hostname, ']') - hostname;
+        host_index = 1;
+    } else if (strrchr(hostname, ':'))
+        port_index = strrchr(hostname, ':') - hostname;
+    else
+        port_index = strlen(hostname);
+    host_length = port_index - host_index;
     
-    target->port = 0x10000;
-    target->hostname = (char*)malloc(strlen(hostname)+1);
-    memcpy(target->hostname, hostname, strlen(hostname)+1);
+    target->hostname = (char*)malloc(host_length + 1);
+    memcpy(target->hostname, &hostname[host_index], host_length + 1);
+    target->hostname[host_length] = '\0';
+    
+    /* parse port */
+    while (hostname[port_index] && ispunct(hostname[port_index]&0xFF))
+        port_index++;
+    target->port = strtoul(&hostname[port_index], 0, 0);
+    if (target->port == 0 || target->port > 65535)
+        target->port = 0x10000; /* default for Tor */
+
 }
 
 /******************************************************************************
