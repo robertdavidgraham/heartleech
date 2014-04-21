@@ -59,6 +59,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <errno.h>
 #define WSAGetLastError() (errno)
 #define closesocket(fd) close(fd)
 #define WSA(err) (err)
@@ -94,6 +95,15 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 #error You are using the wrong version of OpenSSL headers.
 #endif
 
+/*
+ * Portability note for 'send()':
+ * - Windows doesn't generate signals on send failures
+ * - Mac/BSD needs a setsockopt
+ * - Linux needs this parameter to 'send()'
+ */
+#if !defined(MSG_NOSIGNAL)
+#define MSG_NOSIGNAL 0
+#endif
 
 /*
  * Use '-d' option to get more verbose debug logging while running
@@ -346,7 +356,14 @@ receive_heartbeat(int write_p, int version, int content_type,
         if (buf[0] == 2) {
             DEBUG_MSG("[-] ALERT fatal %u len=%u\n", buf[1], len);
         } else {
-            DEBUG_MSG("[-] ALERT warning %u len=%u\n", buf[1], len);
+            switch (buf[1]) {
+                case SSL3_AD_CLOSE_NOTIFY:
+                    DEBUG_MSG("[-] ALERT warning: connection closing\n");
+                    break;
+                default:
+                    DEBUG_MSG("[-] ALERT warning %u len=%u\n", buf[1], len);
+                    break;
+            }
         }
         connection->is_alert = 1;
         return;
@@ -817,7 +834,7 @@ proxy_handshake(int fd,
     /* 
      * negotiate version=5, passwords=none 
      */
-    x = send(fd, "\x05\x01\x00", 3, 0);
+    x = send(fd, "\x05\x01\x00", 3, MSG_NOSIGNAL);
     if (x < 3) {
         ERROR_MSG("[-] proxy handshake: %s (%u)\n", 
             error_msg(WSAGetLastError()), WSAGetLastError());
@@ -864,7 +881,7 @@ proxy_handshake(int fd,
         foo[offset++] = (unsigned char)(target->port>>8);
         foo[offset++] = (unsigned char)(target->port>>0);
     }
-    x = send(fd, (char*)foo, offset, 0);
+    x = send(fd, (char*)foo, offset, MSG_NOSIGNAL);
     if (x != offset) {
         ERROR_MSG("[-] proxied connect: %s (%u)\n", 
             error_msg(WSAGetLastError()), WSAGetLastError());
@@ -1057,7 +1074,7 @@ starttls_smtp(int fd,
 
 
     /* send STARTTLS */
-    if (send(fd, "STARTTLS\r\n", 10, 0) != 10) {
+    if (send(fd, "STARTTLS\r\n", 10, MSG_NOSIGNAL) != 10) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
@@ -1108,7 +1125,7 @@ starttls_ftp(int fd,
     }
 
     /* send starttls */
-    if (send(fd, "AUTH TLS\r\n", 10, 0) != 10) {
+    if (send(fd, "AUTH TLS\r\n", 10, MSG_NOSIGNAL) != 10) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
@@ -1173,7 +1190,7 @@ starttls_imap4(int fd,
 
     
     /* send greetings */
-    if (send(fd, "efgh STARTTLS\r\n", 15, 0) != 15) {
+    if (send(fd, "efgh STARTTLS\r\n", 15, MSG_NOSIGNAL) != 15) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
@@ -1219,7 +1236,7 @@ starttls_pop3(int fd,
 
     
     /* send greetings */
-    if (send(fd, "STLS\r\n", 6, 0) != 6) {
+    if (send(fd, "STLS\r\n", 6, MSG_NOSIGNAL) != 6) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
@@ -1321,7 +1338,12 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     fd = socket(addr->ai_family, SOCK_STREAM, 0);
     if (fd < 0)
         return ERROR_MSG("%u: could not create socket\n", addr->ai_family);
-    
+#if defined(SO_NOSIGPIPE)
+    {
+        int set = 1;
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (void *)&set, sizeof(int));
+    }
+#endif
     
     /*
      * Do a normal TCP connect to the target IP address, sending a SYN and
@@ -1445,9 +1467,11 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
             if (len > sizeof(buf))
                 len = sizeof(buf);
             BIO_read(wbio, buf, (int)len);
-            x = send(fd, buf, (int)len, 0);
+            x = send(fd, buf, (int)len, MSG_NOSIGNAL);
             if (x <= 0) {
-                ERROR_MSG("[-] %s:%s send fail\n", address, port);
+                unsigned err = WSAGetLastError();
+                ERROR_MSG("[-] %s:%s send fail: %s (%u)\n", 
+                          address, port, error_msg(err), err);
                 goto end;
             }
         }
@@ -1529,6 +1553,7 @@ again:
         DEBUG_MSG("[-] loop-count = 0\n");
         goto end;
     }
+        
 
     /*
      * Print how many bytes we've downloaded on command-line every
@@ -1643,9 +1668,11 @@ again:
         if (len > sizeof(buf))
             len = sizeof(buf);
         BIO_read(wbio, buf, (int)len);
-        x = send(fd, buf, (int)len, 0);
+        x = send(fd, buf, (int)len, MSG_NOSIGNAL);
         if (x <= 0) {
-            ERROR_MSG("[-] %s:%s: send fail\n", address, port);
+            unsigned err = WSAGetLastError();
+            ERROR_MSG("[-] %s:%s send fail: %s (%u)\n", 
+                      address, port, error_msg(err), err);
             goto end;
         }
     }
@@ -1662,7 +1689,7 @@ again:
 
         /* if we can an ALERT at the SSL layer, break out of this loop */
         if (connection->is_alert)
-            break;
+            goto end;
         
         /* only wait a few seconds for a response */
         if (started + args->timeout < time(0)) {
@@ -1677,6 +1704,9 @@ again:
             if (x > 0) {
                 total_bytes += x;
                 BIO_write(rbio, buf, x);
+            } else {
+                unsigned err = WSAGetLastError();
+                ERROR_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
             }
         }
 
