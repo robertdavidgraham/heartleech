@@ -172,8 +172,11 @@ struct Applications {
     { 389, 1, APP_LDAP},
     { 433, 1, APP_NNTP},
     { 443, 0, APP_HTTP},
+    { 465, 0, APP_SMTP},
     { 587, 1, APP_SMTP},
     { 674, 1, APP_ACAP},
+    { 993, 0, APP_IMAP4},
+    { 995, 0, APP_POP3},
     {5222, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
     {5269, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
     {5432, 1, APP_POSTGRES},
@@ -1075,6 +1078,172 @@ starttls_smtp(int fd,
     return 0;
 }
 
+/******************************************************************************
+ ******************************************************************************/
+static int
+starttls_ftp(int fd, 
+                const struct DumpArgs *args, const struct Target *target)
+{
+    unsigned char line[2048];
+    unsigned offset;
+    char proxy_address[300] = "";
+    unsigned proxy_port = 0;
+    int x;
+
+
+    /* grab the helo line */
+    for (;;) {
+        offset = 0;
+        x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+        if (x < 0)
+            return x;
+        DEBUG_MSG("[+] %.*s", offset, line);
+        if (line[0] != '2') {
+            ERROR_MSG("[-] starttls handshake: unexpected data\n");
+            return -1;
+        }
+        if (line[3] != '-')
+            break;
+    }
+
+    /* send starttls */
+    if (send(fd, "AUTH TLS\r\n", 10, 0) != 10) {
+        ERROR_MSG("[-] starttls handshake: network error\n");
+        return -1;
+    }
+
+    /* grab their response */
+    for (;;) {
+        offset = 0;
+        x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+        if (x < 0)
+            return x;
+        DEBUG_MSG("[+] %.*s", offset, line);
+        if (line[0] != '2') {
+            ERROR_MSG("[-] starttls handshake: unexpected data\n");
+            return -1;
+        }
+        if (line[3] != '-')
+            break;
+    }
+
+    DEBUG_MSG("[+] SMTP STARTTLS engaged\n");
+    return 0;
+}
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+contains(const unsigned char line[], size_t length, const char substring[])
+{
+    size_t i;
+    size_t substring_length = strlen(substring);
+
+    if (substring_length > length)
+        return 0;
+
+    for (i = 0; i < length - substring_length; i++) {
+        if (line[i] == substring[0])
+            if (memcmp(line+i, substring, substring_length) == 0)
+                return 1;
+    }
+
+    return 0;
+}
+
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+starttls_imap4(int fd, 
+                const struct DumpArgs *args, const struct Target *target)
+{
+    unsigned char line[2048];
+    unsigned offset;
+    char proxy_address[300] = "";
+    unsigned proxy_port = 0;
+    int x;
+
+
+    /* grab the helo line */
+    offset = 0;
+    x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+    if (x < 0)
+        return x;
+    DEBUG_MSG("[+] %.*s", offset, line);
+
+    
+    /* send greetings */
+    if (send(fd, "efgh STARTTLS\r\n", 15, 0) != 15) {
+        ERROR_MSG("[-] starttls handshake: network error\n");
+        return -1;
+    }
+
+    
+    /* grab their response */
+    offset = 0;
+    x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+    if (x < 0)
+        return x;
+    DEBUG_MSG("[+] %.*s", offset, line);
+    if (!contains(line, offset, " OK ")) {
+        ERROR_MSG("[-] starttls handshake: unexpected data\n");
+        return -1;
+    }
+
+
+    DEBUG_MSG("[+] IMAP4 STARTTLS engaged\n");
+    return 0;
+}
+
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+starttls_pop3(int fd, 
+                const struct DumpArgs *args, const struct Target *target)
+{
+    unsigned char line[2048];
+    unsigned offset;
+    char proxy_address[300] = "";
+    unsigned proxy_port = 0;
+    int x;
+
+
+    /* grab the helo line */
+    offset = 0;
+    x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+    if (x < 0)
+        return x;
+    DEBUG_MSG("[+] %.*s", offset, line);
+    if (offset < 4 || memcmp(line, "+OK ", 4) != 0) {
+        ERROR_MSG("[-] starttls handshake: unexpected data\n");
+    }
+
+    
+    /* send greetings */
+    if (send(fd, "STLS\r\n", 6, 0) != 6) {
+        ERROR_MSG("[-] starttls handshake: network error\n");
+        return -1;
+    }
+
+    
+    /* grab their response */
+    offset = 0;
+    x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
+    if (x < 0)
+        return x;
+    DEBUG_MSG("[+] %.*s", offset, line);
+    if (offset < 4 || memcmp(line, "+OK ", 4) != 0) {
+        ERROR_MSG("[-] starttls handshake: unexpected data\n");
+        return -1;
+    }
+
+
+    DEBUG_MSG("[+] POP STARTTLS engaged\n");
+    return 0;
+}
+
 
 
 /******************************************************************************
@@ -1196,6 +1365,30 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
         break;
     case APP_SMTP:
         if (starttls_smtp(fd, args, target) == -1) {
+            ERROR_MSG("[-] starttls handshake failed\n");
+            if (target->loop.done == 0)
+                target->loop.desired = 0;
+            goto end;
+        }
+        break;
+    case APP_IMAP4:
+        if (starttls_imap4(fd, args, target) == -1) {
+            ERROR_MSG("[-] starttls handshake failed\n");
+            if (target->loop.done == 0)
+                target->loop.desired = 0;
+            goto end;
+        }
+        break;
+    case APP_POP3:
+        if (starttls_pop3(fd, args, target) == -1) {
+            ERROR_MSG("[-] starttls handshake failed\n");
+            if (target->loop.done == 0)
+                target->loop.desired = 0;
+            goto end;
+        }
+        break;
+    case APP_FTP:
+        if (starttls_ftp(fd, args, target) == -1) {
             ERROR_MSG("[-] starttls handshake failed\n");
             if (target->loop.done == 0)
                 target->loop.desired = 0;
@@ -1382,6 +1575,18 @@ again:
                          SSL3_RT_APPLICATION_DATA, 
                          "NOOP\r\n",
                          6);
+        break;
+    case APP_POP3:
+        ssl3_write_bytes(ssl, 
+                         SSL3_RT_APPLICATION_DATA, 
+                         "STAT\r\n",
+                         6);
+        break;        
+    case APP_IMAP4:
+        ssl3_write_bytes(ssl, 
+                         SSL3_RT_APPLICATION_DATA, 
+                         "a001 CAPABILITY\r\n",
+                         17);
         break;
     default:
         /*ssl3_write_bytes(ssl, 
