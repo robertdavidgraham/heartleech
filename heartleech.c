@@ -166,6 +166,8 @@ enum {
     APP_ACAP,
     APP_POSTGRES,
     APP_XMPP,
+    APP_TELNET,
+    APP_IRC
 };
 
 /**
@@ -185,9 +187,13 @@ struct Applications {
     { 433, 1, APP_NNTP},
     { 443, 0, APP_HTTP},
     { 465, 0, APP_SMTP},
+    { 563, 0, APP_NNTP},
     { 587, 1, APP_SMTP},
+    { 636, 0, APP_LDAP},
     { 674, 1, APP_ACAP},
+    { 992, 0, APP_TELNET},
     { 993, 0, APP_IMAP4},
+    { 994, 0, APP_IRC},
     { 995, 0, APP_POP3},
     {5222, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
     {5269, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
