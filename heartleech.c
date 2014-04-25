@@ -60,6 +60,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>
+#include <dlfcn.h>
 #define WSAGetLastError() (errno)
 #define closesocket(fd) close(fd)
 #define WSA(err) (err)
@@ -84,6 +85,7 @@
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/rsa.h>
+
 
 /*
  * This is an internal function, not declared in headers, we we
@@ -300,6 +302,61 @@ int DEBUG_MSG(const char *fmt, ...)
     return -1;
 }
 
+/******************************************************************************
+ ******************************************************************************/
+struct pcre;
+struct pcre_extra;
+struct PCRE {
+    struct pcre *(*compile)(const char *pattern, int options,
+                            const char **errptr, int *erroffset,
+                            const unsigned char *tableptr);
+    int (*exec)(const struct pcre *code, const struct pcre_extra *extra,
+                const char *subject, int length, int startoffset,
+                int options, int *ovector, int ovecsize);
+    const char *(*version)(void);
+} PCRE;
+
+/******************************************************************************
+ * Load the PCRE library for capturing patterns.
+ ******************************************************************************/
+static void
+load_pcre(void)
+{
+    void *h;
+    const char *library_names[] = {
+        "libpcre.dylib", 0 };
+    size_t i;
+    
+    /* look for a PCRE library */
+    for (i=0; library_names[i]; i++) {
+        h = dlopen(library_names[i], 0);
+        if (h)
+            break;
+        perror(library_names[i]);
+    }
+    if (h == NULL)
+        return;
+    
+    /* load symbols */
+    PCRE.compile = dlsym(h, "pcre_compile");
+    if (PCRE.compile == NULL) {
+        perror("pcre_compile");
+        return;
+    }
+    PCRE.exec = dlsym(h, "pcre_exec");
+    if (PCRE.exec == NULL) {
+        perror("pcre_exec");
+        return;
+    }
+    PCRE.version = dlsym(h, "pcre_version");
+    if (PCRE.version == NULL) {
+        perror("pcre_version");
+        return;
+    }
+    
+    fprintf(stderr, "PCRE library: %s\n", PCRE.version());
+}
+
 
 /******************************************************************************
  * Prints a typical hexdump, for debug purposes.
@@ -506,21 +563,17 @@ my_inet_pton(const char *hostname,
                 unsigned char *dst, size_t offset, size_t max,
                 unsigned char *type)
 {
-    struct sockaddr_in sin;
-    struct sockaddr_in6 sin6;
     size_t len;
 
 
-    if (inet_pton(AF_INET, hostname, (struct sockaddr *)&sin) == 1) {
-        if (offset + 4 <= max)
-            memcpy(&dst[offset], &sin.sin_addr, 4);
+    if (max-offset >= 4 
+        && inet_pton(AF_INET, hostname, &dst[offset]) == 1) {
         *type = 1; /* socks5 type = IPv4 */
         return offset + 4;
     }
     
-    if (inet_pton(AF_INET6, hostname, (struct sockaddr *)&sin6) == 1) {
-        if (offset + 16 <= max)
-            memcpy(&dst[offset], &sin6.sin6_addr, 16);
+    if (max-offset >= 16 
+        && inet_pton(AF_INET6, hostname, dst) == 1) {
         *type = 4; /* socks5 type = IPv6*/
         return offset + 16;
     }
@@ -2257,7 +2310,6 @@ run_scan(const struct DumpArgs *args, size_t start, size_t stop)
     }    
 }
 
-
 /******************************************************************************
  ******************************************************************************/
 int
@@ -2270,9 +2322,11 @@ main(int argc, char *argv[])
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
 
-    fprintf(stderr, "\n--- heartleech/1.0.0e ---\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0f ---\n");
     fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
 
+    load_pcre();
+    
     /*
      * Print usage information
      */
