@@ -2172,6 +2172,8 @@ heartleech_set_parameter(struct DumpArgs *args,
         if (args->op == 0)
             args->op = Op_Dump;
         return 1;
+    } else if (EQUALS("timeout", name)) {
+        args->timeout = strtoul(value, 0, 0);
     } else {
         ERROR_MSG("[-] unknown parameter: %s\n", name);
         exit(1);
