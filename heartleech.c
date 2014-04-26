@@ -53,6 +53,8 @@
 #define sleep(secs) Sleep(1000*(secs))
 #define WSA(err) (WSA##err)
 #define strdup _strdup
+#define dlopen(name, flags) LoadLibraryA(name)
+#define dlsym(handle, name) (void (*)(void))GetProcAddress(handle, name)
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
