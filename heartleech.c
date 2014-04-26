@@ -568,17 +568,40 @@ my_inet_pton(const char *hostname,
     size_t len;
 
 
+#if defined(WIN32)
+    if (max-offset >= sizeof(struct sockaddr_in)) {
+        struct sockaddr_in sin;
+
+        if (inet_pton(AF_INET, hostname, &sin) == 1) {
+            memcpy(&dst[offset], &sin.sin_addr, 4);
+            *type = 1; /* socks5 type = IPv4 */
+            return offset + 4;
+        }
+    }
+#else
     if (max-offset >= 4 
         && inet_pton(AF_INET, hostname, &dst[offset]) == 1) {
         *type = 1; /* socks5 type = IPv4 */
         return offset + 4;
     }
+#endif
     
+#if defined(WIN32)
+    if (max-offset >= 16) {
+        struct sockaddr_in6 sin6;
+        if (inet_pton(AF_INET6, hostname, &sin6) == 1) {
+            memcpy(&dst[offset], &sin6.sin6_addr, 16);
+            *type = 4; /* socks5 type = IPv6*/
+            return offset + 16;
+        }
+    }
+#else
     if (max-offset >= 16 
-        && inet_pton(AF_INET6, hostname, dst) == 1) {
+        && inet_pton(AF_INET6, hostname, &dst[offset]) == 1) {
         *type = 4; /* socks5 type = IPv6*/
         return offset + 16;
     }
+#endif
 
     len = strlen(hostname);
     if (offset + len + 1 <= max) {
