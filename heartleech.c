@@ -863,6 +863,7 @@ error_msg(unsigned err)
     case WSA(ECONNRESET): return "TCP connection reset";
     case WSA(ECONNREFUSED): return "Connection refused";
     case WSA(ETIMEDOUT): return "Timed out";
+    case WSA(ECONNABORTED): return "Connection aborted";
     case 0: return "TCP connection closed";
     default:   return "network error";
     }
@@ -1791,6 +1792,7 @@ again:
             } else {
                 unsigned err = WSAGetLastError();
                 ERROR_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
+                goto end;
             }
         }
 
