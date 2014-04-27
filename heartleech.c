@@ -1877,7 +1877,7 @@ again:
                 BIO_write(rbio, buf, x);
             } else {
                 unsigned err = WSAGetLastError();
-                ERROR_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
+                DEBUG_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
                 goto end;
             }
         }
