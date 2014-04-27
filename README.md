@@ -51,13 +51,21 @@ OpenSSL for one 32/64 bits leaves artifacts behind that disrupt the other
 build, so you need two separate directories to build the two different sizes.
 
 Mac OS X includes OpenSSL/0.9.8, which doesn't support heartbeats (Jon Callas
-has an excellent post as to why). Therefore, you need to follow the same steps
-as above for Linux. However, instead of the normal
-"`./config`" command, you have to do "`./Configure darwin64-x86_64-cc`". I 
-just build the 64-bit version, but in theory you should be able to build
-the 32-bit version and even the PowerPC version. If you want to make a
-"universal" binary containing all the versions, you'll have to build each
-static library separately, then link them all together.
+has an excellent post as to why). This causes problems: you have to make sure
+to get the right include headers. Also, there is a special step for building.
+The full sequence of commands is:
+
+    git clone git://git.openssl.org/openssl.git
+    cd openssl
+    ./Configure darwin64-x86_64-cc
+    make depend
+    make
+
+    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -o heartleech -I./include
+
+This makes the 64-bit version. If you want 32-bit, PowerPC, and/or univeral
+executables, there are some extra steps to do. It starts with having a separate
+directory for each version of the OpenSSL library that you need.
 
 
 #Running#
