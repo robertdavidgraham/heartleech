@@ -195,6 +195,7 @@ struct Applications {
     { 587, 1, APP_SMTP},
     { 636, 0, APP_LDAP},
     { 674, 1, APP_ACAP},
+    { 990, 0, APP_FTP},
     { 992, 0, APP_TELNET},
     { 993, 0, APP_IMAP4},
     { 994, 0, APP_IRC},
@@ -308,14 +309,19 @@ int DEBUG_MSG(const char *fmt, ...)
  ******************************************************************************/
 struct pcre;
 struct pcre_extra;
-struct PCRE {
-    struct pcre *(*compile)(const char *pattern, int options,
+
+typedef struct pcre *(*PCRE_compile)(const char *pattern, int options,
                             const char **errptr, int *erroffset,
                             const unsigned char *tableptr);
-    int (*exec)(const struct pcre *code, const struct pcre_extra *extra,
+typedef int (*PCRE_exec)(const struct pcre *code, const struct pcre_extra *extra,
                 const char *subject, int length, int startoffset,
                 int options, int *ovector, int ovecsize);
-    const char *(*version)(void);
+typedef const char *(*PCRE_version)(void);
+
+struct PCRE {
+    PCRE_compile compile;
+    PCRE_exec exec;
+    PCRE_version version;
 } PCRE;
 
 /******************************************************************************
@@ -326,31 +332,40 @@ load_pcre(void)
 {
     void *h;
     const char *library_names[] = {
-        "libpcre.dylib", 0 };
+#if defined(__linux__)
+        "libpcre.so",
+#elif defined(WIN32)
+        "libpcre.dll",
+#else
+        "libpcre.dylib", 
+#endif
+        0 };
     size_t i;
     
     /* look for a PCRE library */
     for (i=0; library_names[i]; i++) {
-        h = dlopen(library_names[i], 0);
+        h = dlopen(library_names[i], RTLD_LAZY);
         if (h)
             break;
-        perror(library_names[i]);
+#ifndef WIN32
+        fprintf(stderr, "%s: %s\n", library_names[i], dlerror());
+#endif
     }
     if (h == NULL)
         return;
     
     /* load symbols */
-    PCRE.compile = dlsym(h, "pcre_compile");
+    PCRE.compile = (PCRE_compile)dlsym(h, "pcre_compile");
     if (PCRE.compile == NULL) {
         perror("pcre_compile");
         return;
     }
-    PCRE.exec = dlsym(h, "pcre_exec");
+    PCRE.exec = (PCRE_exec)dlsym(h, "pcre_exec");
     if (PCRE.exec == NULL) {
         perror("pcre_exec");
         return;
     }
-    PCRE.version = dlsym(h, "pcre_version");
+    PCRE.version = (PCRE_version)dlsym(h, "pcre_version");
     if (PCRE.version == NULL) {
         perror("pcre_version");
         return;
@@ -572,7 +587,7 @@ my_inet_pton(const char *hostname,
     if (max-offset >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in sin;
 
-        if (inet_pton(AF_INET, hostname, &sin) == 1) {
+        if (inet_pton(AF_INET, hostname, (struct sockaddr*)&sin) == 1) {
             memcpy(&dst[offset], &sin.sin_addr, 4);
             *type = 1; /* socks5 type = IPv4 */
             return offset + 4;
@@ -589,7 +604,7 @@ my_inet_pton(const char *hostname,
 #if defined(WIN32)
     if (max-offset >= 16) {
         struct sockaddr_in6 sin6;
-        if (inet_pton(AF_INET6, hostname, &sin6) == 1) {
+        if (inet_pton(AF_INET6, hostname, (struct sockaddr*)&sin6) == 1) {
             memcpy(&dst[offset], &sin6.sin6_addr, 16);
             *type = 4; /* socks5 type = IPv6*/
             return offset + 16;
