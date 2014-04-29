@@ -16,23 +16,23 @@ such as automatically extracting the SSL private-key (autopwn).
 
   * `<host>`: the target's name, IPv4 address, or IPv6 address.
 
-  * `-p <port>`: the port number to connect to on the target machine. If not
+  * `--port <port>`: the port number to connect to on the target machine. If not
     specified, the port number 443 will be used.
 
-  * `-f <filename>`: the file where bleeding information is stored. Typically,
+  * `--dump <filename>`: the file where bleeding information is stored. Typically,
     the user will use this program to grab data from a server, then use
     other tools to search those files for things, such as cookies, passwords,
     and private strings.
 
-  * `-a`: sets "auto-pwn" mode, which automatically searches the bleeding
+  * `--autopwn`: sets "auto-pwn" mode, which automatically searches the bleeding
     buffers for the private-key. If the private-key is found, it will be
     printed to <stdout>, and the program will exit.
 
-  * `-F`: instead of running live against a server, this option causes
+  * `--read`: instead of running live against a server, this option causes
     the program to run forensics on existing files, looking for private
-    keys. The option `-c` must also be used.
+    keys. The option `--cert` must also be used.
 
-  * `-c`: in offline mode, this option tells the program the certificate to
+  * `--cert`: in offline mode, this option tells the program the certificate to
     load. A certificate, containing the public-key, is needed in order to 
     search data for the matching components of a private key. In online
     mode, this option isn't necessary, because the certificate is fetched
@@ -41,25 +41,27 @@ such as automatically extracting the SSL private-key (autopwn).
   * `-d`: sets the 'debug' flag, which causes a lot of debug information to
     be printed to <stderr>. Using this will help diagnose connection problems.
 
-  * `-v <ipver>`: sets the version of IP to use, either 4 for IPv4 or 6 for 
+  * `--ipver <ver>`: sets the version of IP to use, either 4 for IPv4 or 6 for 
     IPv6. Otherwise, the program tries to guess from the address given,
     or chooses whichever is first when doing a DNS lookup.
 
-  * `-S`: randomizes the size of heartbleed requests. Normally, the program
+  * `--rand`: randomizes the size of heartbleed requests. Normally, the program
     requests for the max 64k size, but with this setting, each request
     will have a random size between 200 and 64k. Some believe that heartbeats
     of different size will produce different results.
 
-  * `-l <count>`: the number of times to loop and try a heartbeat again. The
+  * `--loop <count>`: the number of times to loop and try a heartbeat again. The
     default count is 1000000 (one-million). A count of 1 grabs just a single
     heartbeat.
+
+  * `--raw`: send the hearbeat requests before SSL negotiation is complete.
 
 ## SIMPLE EXAMPLES
 
 The following is the easiest way to use the program, to grab the private-key
 form the server in 'auto-pwn' mode:
 
-    $ heartleech www.example.com -a
+    $ heartleech www.example.com --autopwn
 
 This auto-pwn mode will search for the heartbeat payloads looking for the 
 components of the private-key that matches the server's certificate (which
@@ -73,7 +75,7 @@ passwords. In that case, the way to use this program is to save all the
 heartbleed information into a file. Note that these files quickly grow
 to gigabytes in size:
 
-    $ heartleech www.example.com -f bleed.bin
+    $ heartleech www.example.com --dump bleed.bin
     <ctrl-c>
     $ grep -iobUaP "Cookie:.*\n" bleed.bin
 
