@@ -177,6 +177,7 @@
 					"\"$(SRCROOT)/../openssl\"",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYMROOT = bin;
 			};
 			name = Debug;
 		};
@@ -189,6 +190,7 @@
 					"\"$(SRCROOT)/../openssl\"",
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SYMROOT = bin;
 			};
 			name = Release;
 		};

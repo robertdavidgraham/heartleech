@@ -204,7 +204,8 @@ struct Applications {
     { 587, 1, APP_SMTP},
     { 636, 0, APP_LDAP},
     { 674, 1, APP_ACAP},
-    { 990, 0, APP_FTP},
+    //{ 989, 0, APP_FTP_DATA}, //source port, not dest port
+    { 990, 0, APP_FTP},  /* command channel */
     { 992, 0, APP_TELNET},
     { 993, 0, APP_IMAP4},
     { 994, 0, APP_IRC},
@@ -214,6 +215,7 @@ struct Applications {
     {5432, 1, APP_POSTGRES},
     {0,0,0}
 };
+
 
 unsigned
 port_to_app(unsigned port, unsigned *is_starttls)
@@ -548,14 +550,14 @@ receive_heartbeat(int write_p, int version, int content_type,
      * See if this is a "good" heartbeat, which we send to probe
      * the system in order to see if it's been patched.
      */
-    if (connection->is_sent_good_heartbeat && len == 67) {
+    if (connection->is_sent_good_heartbeat && len < 60) {
         static const char *good_response =
-            "\x02\x00\x18"
+            "\x02\x00\x12"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             "aaaaaaaaaaaaaaaa"
             ;
-        if (memcmp(buf, good_response, 18+3) == 0) {
+        if (memcmp(buf, good_response, 0x12+3) == 0) {
             ERROR_MSG("[-] PATCHED: heartBEAT received, but not BLEED\n");
             connection->heartbleeds.failed++;
             target->scan_result = Verdict_Safe;
@@ -2814,7 +2816,7 @@ main(int argc, char *argv[])
     args.default_port = 443;
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
-
+    
     fprintf(stderr, "\n--- heartleech/1.0.0f ---\n");
     fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
 
