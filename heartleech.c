@@ -55,6 +55,11 @@
 #define strdup _strdup
 #define dlopen(name, flags) LoadLibraryA(name)
 #define dlsym(handle, name) (void (*)(void))GetProcAddress(handle, name)
+typedef CRITICAL_SECTION pthread_mutex_t;
+#define pthread_mutex_lock(p) EnterCriticalSection(p)
+#define pthread_mutex_unlock(p) LeaveCriticalSection(p)
+#define pthread_mutex_init(p,q) InitializeCriticalSection(p)
+
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
