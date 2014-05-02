@@ -1,2 +1,6 @@
 *
 !.gitignore
+!win32/heartleech.exe
+!macosx/heartleech
+!kali32/heartleech
+!kali64/heartleech
