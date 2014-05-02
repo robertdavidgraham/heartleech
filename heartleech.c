@@ -49,6 +49,8 @@
 #if defined(WIN32)
 #include <WinSock2.h>
 #include <WS2tcpip.h>
+#include <intrin.h>
+#include <process.h>
 #define snprintf _snprintf
 #define sleep(secs) Sleep(1000*(secs))
 #define WSA(err) (WSA##err)
@@ -59,7 +61,11 @@ typedef CRITICAL_SECTION pthread_mutex_t;
 #define pthread_mutex_lock(p) EnterCriticalSection(p)
 #define pthread_mutex_unlock(p) LeaveCriticalSection(p)
 #define pthread_mutex_init(p,q) InitializeCriticalSection(p)
-
+typedef uintptr_t pthread_t;
+#define __sync_fetch_and_add(p,n) InterlockedExchangeAdd(p, n)
+#define __sync_fetch_and_sub(p,n) InterlockedExchangeAdd(p, -(n))
+#define pthread_create(handle,x,pfn,data) (*(handle)) = _beginthread(pfn,0,data)
+#define usleep(microseconds) Sleep((microseconds)/1000)
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -301,7 +307,10 @@ struct DumpArgs {
     struct TargetList targets;
     unsigned default_port;
     struct CapturePatterns patterns;
-    unsigned thread_count; /* number of desired threads */
+    struct {
+        unsigned desired; /* number of desired threads, configed */
+        volatile unsigned running; /* number of threads actually started */
+    } threads;
 };
 
 
@@ -2466,30 +2475,35 @@ index_of(const char *str, const char *substring)
 }
 
 /******************************************************************************
- * Add a target to our list, when scanning multiple targets
+ ******************************************************************************/
+void
+x_split(const char hostname[], unsigned host_index, unsigned host_length,
+            unsigned *r_host_index, unsigned *r_host_length,
+            unsigned *r_range_index, unsigned *r_range_length)
+{
+    unsigned i;
+
+    *r_range_index = *r_host_index;
+    *r_range_length = *r_host_length;
+
+    for (i=host_index; i<host_length; i++) {
+        if (hostname[i] == '-') {
+            *r_host_length = i - host_index;
+            *r_range_index = i + 1;
+            *r_range_length = host_length - i - 1;
+            return;
+        }
+    }
+}
+
+/******************************************************************************
  ******************************************************************************/
 static void
-add_target(struct TargetList *targets, const char *hostname)
+add_target2(struct TargetList *targets, const char *hostname,
+    unsigned host_index, unsigned host_length,
+    const char *portname, unsigned port_index)
 {
     struct Target *target;
-    unsigned port_index;
-    unsigned host_index = 0;
-    unsigned host_length;
-
-    
-    /*
-     * parse for port info 
-     */
-    if (hostname[0] == '[' && strchr(hostname, ']')) {
-        port_index = strchr(hostname, ']') - hostname;
-        host_index = 1;
-    } else if (strrchr(hostname, ':'))
-        port_index = strrchr(hostname, ':') - hostname;
-    else
-        port_index = strlen(hostname);
-    host_length = port_index - host_index;
-    
-    
 
     /* 
      * Expand the list to accomodate the new target 
@@ -2518,13 +2532,97 @@ add_target(struct TargetList *targets, const char *hostname)
     target->hostname[host_length] = '\0';
 
     /* parse port */
-    while (hostname[port_index] && ispunct(hostname[port_index]&0xFF))
+    while (portname[port_index] && ispunct(portname[port_index]&0xFF))
         port_index++;
-    target->port = strtoul(&hostname[port_index], 0, 0);
+    target->port = strtoul(&portname[port_index], 0, 0);
     if (target->port == 0 || target->port > 65535)
         target->port = 0x10000; /* default for Tor */
-
 }
+
+/******************************************************************************
+ * Add a target to our list, when scanning multiple targets
+ ******************************************************************************/
+static void
+add_target(struct TargetList *targets, const char *hostname)
+{
+    unsigned port_index;
+    unsigned host_index = 0;
+    unsigned host_length;
+    unsigned range_index;
+    unsigned range_length;
+
+    
+    /*
+     * parse for port info 
+     */
+    if (hostname[0] == '[' && strchr(hostname, ']')) {
+        port_index = strchr(hostname, ']') - hostname;
+        host_index = 1;
+    } else if (strrchr(hostname, ':'))
+        port_index = strrchr(hostname, ':') - hostname;
+    else
+        port_index = strlen(hostname);
+    host_length = port_index - host_index;
+    
+
+    /*
+     * Parse for range
+     */
+    x_split(hostname, host_index, host_length,
+            &host_index, &host_length,
+            &range_index, &range_length);
+
+
+    /*
+     * Add target
+     * - either this name/IPv4/IPv6 address
+     * - or this IPv4-IPv4 range
+     */
+    if (host_index == range_index) {
+        add_target2(targets, hostname, host_index, host_length, hostname, port_index);
+    } else {
+        size_t n;
+        char *host1 = malloc(host_length+1);
+        char *host2 = malloc(range_length+1);
+        unsigned char foo[16];
+        unsigned char type = 0;
+        unsigned ip_start;
+        unsigned ip_stop;
+        
+        memcpy(host1, hostname+host_index, host_length);
+        host1[host_length] = '\0';
+        memcpy(host2, hostname+range_index, range_length);
+        host2[range_length] = '\0';
+        
+        n = my_inet_pton(host1, foo, 0, sizeof(foo), &type);
+        if (type != 1) {
+            fprintf(stderr, "[-] bad range spec: %s\n", hostname);
+            exit(1);
+        }
+        ip_start = foo[0]<<24 | foo[1]<<16 | foo[2]<<8 | foo[3];
+        type = 0;
+
+        n = my_inet_pton(host2, foo, 0, sizeof(foo), &type);
+        if (type != 1) {
+            fprintf(stderr, "[-] bad range spec: %s\n", hostname);
+            exit(1);
+        }
+        ip_stop = foo[0]<<24 | foo[1]<<16 | foo[2]<<8 | foo[3];
+
+
+        while (ip_start <= ip_stop) {
+            char host2[32];
+            snprintf(host2, sizeof(host2), "%u.%u.%u.%u",
+                (ip_start>>24)&0xFF,
+                (ip_start>>16)&0xFF,
+                (ip_start>> 8)&0xFF,
+                (ip_start>> 0)&0xFF);
+            add_target2(targets, host2, 0, strlen(host2), hostname, port_index);
+            ip_start++;
+        }
+    }
+}
+
 
 /******************************************************************************
  * Called by the configuration-reading function for processing options
@@ -2643,6 +2741,9 @@ heartleech_set_parameter(struct DumpArgs *args,
         args->is_scan = 1;
         is_scan = 1;
         return 0; /* no 'value' argument */
+    } else if (EQUALS("threads", name)) {
+        args->threads.desired = strtoul(value, 0, 0);
+        return 1;
     } else if (EQUALS("scanlist", name)) {
         FILE *fp;
         heartleech_set_parameter(args, "scan", "true");
@@ -2863,6 +2964,8 @@ run_scan(const struct DumpArgs *args)
         if (target.http_request)
             free(target.http_request);
     }
+
+    __sync_fetch_and_sub(&((struct DumpArgs*)args)->threads.running, 1);
 }
 
 /******************************************************************************
@@ -2877,7 +2980,6 @@ main(int argc, char *argv[])
     args.default_port = 443;
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
-    args.thread_count = 1;
     
     fprintf(stderr, "\n--- heartleech/1.0.0g ---\n");
     fprintf(stderr, "https://github.com/robertdavidgraham/heartleech\n");
@@ -2967,7 +3069,18 @@ main(int argc, char *argv[])
                 ERROR_MSG("[-] most specify target host\n");
                 exit(1);
             }
-            run_scan(&args);
+            if (args.threads.desired == 0)
+                run_scan(&args);
+            else {
+                unsigned i;
+                for (i=0; i<args.threads.desired; i++) {
+                    pthread_t handle;
+                    __sync_fetch_and_add(&args.threads.running, 1);
+                    pthread_create(&handle, 0, (void(*)(void*))run_scan, &args);
+                }
+                while (args.threads.running)
+                    usleep(1000);
+            }
             return 0;
 
         case Op_Offline:
