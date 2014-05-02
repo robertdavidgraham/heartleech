@@ -33,7 +33,7 @@ system) using the following steps:
     make depend
     make
 
-    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -o heartleech
+    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -lpthread -o heartleech
 
 On Cygwin (and maybe other platforms), the order in which you link the
 libraries apparently matters, so do "`libcrypto.a`" first, then "`libssl.a`", 
@@ -61,7 +61,7 @@ The full sequence of commands is:
     make depend
     make
 
-    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -o heartleech -I./include
+    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -lpthread -o heartleech -I./include
 
 This makes the 64-bit version. If you want 32-bit, PowerPC, and/or univeral
 executables, there are some extra steps to do. It starts with having a separate
@@ -83,6 +83,11 @@ Here is an example for scanning:
 
 A big feature of this program is that it is conclusive as to whether a target
 is "SAFE" or "VULNERABLE". Otherwise, the target is marked "INCONCLUSIVE".
+Instead of a single target, you can use `--scanlist <filename>` to read
+from a file. Instead of the default port, you can scan different ports,
+such as `www.google.com:25`. You can specify a range of IPv4 addresses by
+using a dash, such as `10.0.0.0-10.0.0.255`. Scanning a lot of addresses can
+be slow, so you can use lots of threads, such as `--threads 100`.
 
 
 Here is an example of dumping bleed information:
