@@ -192,7 +192,8 @@ enum {
     APP_POSTGRES,
     APP_XMPP,
     APP_TELNET,
-    APP_IRC
+    APP_IRC,
+    APP_SNMP,
 };
 
 /**
@@ -225,6 +226,8 @@ struct Applications {
     {5222, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
     {5269, 1, APP_XMPP}, /* http://xmpp.org/extensions/xep-0035.html */
     {5432, 1, APP_POSTGRES},
+    {10161, 0, APP_SNMP}, /* SNMP over (D)TLS RFC 5953 test.net-snmp.org */
+    {10162, 0, APP_SNMP}, /* traps listener */
     {0,0,0}
 };
 
@@ -317,10 +320,14 @@ struct DumpArgs {
 static void print_status(const struct DumpArgs *args)
 {
     static time_t last_status = 0;
+    static unsigned long long last_total_bytes = 0;
     if (last_status + 1 <= time(0)) {
         if (!args->is_scan)
-            fprintf(stderr, "%llu bytes downloaded\r", args->total_bytes);
+            fprintf(stderr, "%llu bytes downloaded (%5.3f-mbps)\r", 
+            args->total_bytes,
+            ((args->total_bytes-last_total_bytes)*8.0)/1000000.0 );
         last_status = time(0);
+        last_total_bytes = args->total_bytes;
     }
 }
 
@@ -2499,7 +2506,7 @@ x_split(const char hostname[], unsigned host_index, unsigned host_length,
 /******************************************************************************
  ******************************************************************************/
 static void
-add_target2(struct TargetList *targets, const char *hostname,
+target_add2(struct TargetList *targets, const char *hostname,
     unsigned host_index, unsigned host_length,
     const char *portname, unsigned port_index)
 {
@@ -2543,7 +2550,7 @@ add_target2(struct TargetList *targets, const char *hostname,
  * Add a target to our list, when scanning multiple targets
  ******************************************************************************/
 static void
-add_target(struct TargetList *targets, const char *hostname)
+target_add(struct TargetList *targets, const char *hostname)
 {
     unsigned port_index;
     unsigned host_index = 0;
@@ -2579,7 +2586,7 @@ add_target(struct TargetList *targets, const char *hostname)
      * - or this IPv4-IPv4 range
      */
     if (host_index == range_index) {
-        add_target2(targets, hostname, host_index, host_length, hostname, port_index);
+        target_add2(targets, hostname, host_index, host_length, hostname, port_index);
     } else {
         size_t n;
         char *host1 = malloc(host_length+1);
@@ -2617,7 +2624,7 @@ add_target(struct TargetList *targets, const char *hostname)
                 (ip_start>>16)&0xFF,
                 (ip_start>> 8)&0xFF,
                 (ip_start>> 0)&0xFF);
-            add_target2(targets, host2, 0, strlen(host2), hostname, port_index);
+            target_add2(targets, host2, 0, strlen(host2), hostname, port_index);
             ip_start++;
         }
     }
@@ -2769,7 +2776,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         fclose(fp);
         return 1;
     } else if (EQUALS("target", name)) {
-        add_target(&args->targets, value);
+        target_add(&args->targets, value);
         if (args->op == 0)
             args->op = Op_Dump;
         return 1;
@@ -2892,6 +2899,41 @@ target_get(const struct DumpArgs *cargs)
 
 
 /******************************************************************************
+ * We may want to run many threads on the same target, dumping the contents.
+ * To do this, we just create many duplicate versions of the target.
+ ******************************************************************************/
+static void
+split_targets(struct DumpArgs *args)
+{
+    size_t new_count;
+    struct TargetList *targets = &args->targets;
+    size_t i;
+    
+    if (args->targets.count == 0)
+        return;
+    if (args->threads.desired <= 1)
+        return;
+
+    /* Create one version of the target for each thread */
+    new_count = args->threads.desired * targets->count;
+
+    /* Create a new target list */
+    targets->list = realloc(targets->list, new_count * sizeof(targets->list[0]));
+    targets->max = new_count;
+
+    /* Now make all the copies */
+    for (i=targets->count; i<new_count; i++) {
+        struct Target *new_target = &targets->list[i];
+        struct Target *old_target = &targets->list[i % targets->count];
+
+        memcpy(new_target, old_target, sizeof(*old_target));
+        new_target->hostname = strdup(old_target->hostname);
+    }
+
+    targets->count = new_count;
+}
+
+/******************************************************************************
  * Scan a list of targets
  ******************************************************************************/
 static void
@@ -2967,6 +3009,7 @@ run_scan(const struct DumpArgs *args)
 
     __sync_fetch_and_sub(&((struct DumpArgs*)args)->threads.running, 1);
 }
+
 
 /******************************************************************************
  ******************************************************************************/
@@ -3064,6 +3107,9 @@ main(int argc, char *argv[])
             goto usage;
 
         case Op_Dump:
+            split_targets(&args);
+            /* drop down */
+
         case Op_Scan:
             if (args.targets.count == 0) {
                 ERROR_MSG("[-] most specify target host\n");
