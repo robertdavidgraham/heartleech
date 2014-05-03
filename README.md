@@ -6,7 +6,7 @@ bug, and then be used to download them. Some important features:
 
   - conclusive/inconclusive verdicts as to whether the target is vulnerable
   - bulk/fast download of heartbleed data into a large files for offline
-    processing
+    processing using many threads
   - automatic retrieval of private keys with no additional steps
   - some limited IDS evasion
   - STARTTLS support
@@ -92,11 +92,11 @@ be slow, so you can use lots of threads, such as `--threads 100`.
 
 Here is an example of dumping bleed information:
 
-    ./heartleech www.cloudflarechallenge.com --dump challenge.bin
+    ./heartleech www.cloudflarechallenge.com --dump challenge.bin --threads 10
 
     --- heartleech/1.0.0e ---
     from https://github.com/robertdavidgraham/heartleech
-    7091376634 bytes downloaded
+    7091376634 bytes downloaded (45.438-mbps)
 
 In this example, the script keeps reconnecting to the server, dumping more
 and more information, sending up to a million requests. This will download
