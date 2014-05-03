@@ -76,12 +76,13 @@
 
 <h2 id="SYNOPSIS">SYNOPSIS</h2>
 
-<p>heartleech <var>host</var> [-p<var>port</var>] [-f<var>filename</var>] [-a]
-heartleech -F<var>filename</var> -c<var>certficate</var></p>
+<p>heartleech <var>host</var> [-p<var>port</var>] [--dump <var>filename</var>] [--autopwn]</p>
+
+<p>heartleech --read <var>filename</var> --cert <var>certficate</var></p>
 
 <h2 id="DESCRIPTION">DESCRIPTION</h2>
 
-<p><strong>heartleech</strong> exploits the well-known "heartbleed" bug in OpenSSL-1.0.1f.
+<p><strong>heartleech</strong> exploits the well-known "heartbleed" bug in &lt;= OpenSSL-1.0.1f.
 It has a number of features that improve over other heartbleed exploits,
 such as automatically extracting the SSL private-key (autopwn).</p>
 
@@ -89,35 +90,59 @@ such as automatically extracting the SSL private-key (autopwn).</p>
 
 <ul>
 <li><p><code>&lt;host></code>: the target's name, IPv4 address, or IPv6 address.</p></li>
-<li><p><code>-p &lt;port></code>: the port number to connect to on the target machine. If not
-specified, the port number 443 will be used.</p></li>
-<li><p><code>-f &lt;filename></code>: the file where bleeding information is stored. Typically,
-the user will use this program to grab data from a server, then use
-other tools to search those files for things, such as cookies, passwords,
-and private strings.</p></li>
-<li><p><code>-a</code>: sets "auto-pwn" mode, which automatically searches the bleeding
+<li><p><code>--autopwn</code>: sets "auto-pwn" mode, which automatically searches the bleeding
 buffers for the private-key. If the private-key is found, it will be
 printed to <var>stdout</var>, and the program will exit.</p></li>
-<li><p><code>-F</code>: instead of running live against a server, this option causes
-the program to run forensics on existing files, looking for private
-keys. The option <code>-c</code> must also be used.</p></li>
-<li><p><code>-c</code>: in offline mode, this option tells the program the certificate to
+<li><p><code>--cert</code>: in offline mode, this option tells the program the certificate to
 load. A certificate, containing the public-key, is needed in order to
 search data for the matching components of a private key. In online
 mode, this option isn't necessary, because the certificate is fetched
 from the server duing the SSL handshake.</p></li>
 <li><p><code>-d</code>: sets the 'debug' flag, which causes a lot of debug information to
-be printed to <var>stderr</var>. Using this will help diagnose connection problems.</p></li>
-<li><p><code>-v &lt;ipver></code>: sets the version of IP to use, either 4 for IPv4 or 6 for
+be printed to <var>stderr</var>. Using this will help diagnose connection problems.
+You should use this the first time you connect to a new host, just to make
+sure things are working well.</p></li>
+<li><p><code>--dump &lt;filename></code>: the file where bleeding information is stored. Typically,
+the user will use this program to grab data from a server, then use
+other tools to search those files for things, such as cookies, passwords,
+and private strings.</p></li>
+<li><p><code>--ipver &lt;ver></code>: sets the version of IP to use, either 4 for IPv4 or 6 for
 IPv6. Otherwise, the program tries to guess from the address given,
-or chooses whichever is first when doing a DNS lookup.</p></li>
-<li><p><code>-S</code>: randomizes the size of heartbleed requests. Normally, the program
+or chooses whichever is first when doing a DNS lookup. Shorter options
+of <code>--ipv6</code> and <code>--ipv4</code> also work.</p></li>
+<li><p><code>--loop &lt;count></code>: the number of times to loop and try a heartbeat again. The
+default count is 1000000 (one-million). A count of 1 grabs just a single
+heartbeat.</p></li>
+<li><p><code>--port &lt;port></code>: the port number to connect to on the target machine. If not
+specified, the port number 443 will be used.</p></li>
+<li><p><code>--proxy &lt;host:port&gt;</code>: use the Socks5n proxy. If the port is not specified,
+it defaults to 9150. This is intended for use with the Tor network, but
+should work with any Socks5 proxy. These uses the 'name' feature, so to
+that it'll be the Tor exit node resolving the DNS name, not the local
+host.</p></li>
+<li><p><code>--rand</code>: randomizes the size of heartbleed requests. Normally, the program
 requests for the max 64k size, but with this setting, each request
 will have a random size between 200 and 64k. Some believe that heartbeats
 of different size will produce different results.</p></li>
-<li><p><code>-l &lt;count></code>: the number of times to loop and try a heartbeat again. The
-default count is 1000000 (one-million). A count of 1 grabs just a single
-heartbeat.</p></li>
+<li><p><code>--read</code>: instead of running live against a server, this option causes
+the program to run forensics on existing files, looking for private
+keys. The option <code>--cert</code> must also be used.</p></li>
+<li><p><code>--raw</code>: send the hearbeat requests before SSL negotiation is complete. Use
+this option on targets where the post-handshake heartbeats don't work.</p></li>
+<li><p><code>--scan</code>: scans target to test if vulnerable, instead of dumping. This
+ends the connection immediately. A verdict will be printed to <var>stdout</var>,
+either VULNERABLE, SAFE, or INCONCLUSIVE. Most systems marked INCONCLUSIVE
+are in fact safe.</p></li>
+<li><p><code>--scanlist &lt;filename></code>: reads a list of targets from a file instead of
+reading them from a command-line, and also sets the <code>--scan</code> flag. Use
+this when you have thousands of targets to scan. Note that if you have
+a lot of targets, you should also set the <code>--threads</code> to a high number.</p></li>
+<li><p><code>--threads &lt;count></code>: uses more than one thread, scanning/dumping a lot
+faster. Setting 1000 threads would not be unreasonable, especially when
+scanning a lot of targets.</p></li>
+<li><p><code>--timeout &lt;n></code>: sets the timeout for read operations on a socket, which
+defaults to 6 seconds. Note that connection timeouts are much longer, set
+by the operating system, and not currently configurable.</p></li>
 </ul>
 
 
@@ -126,14 +151,14 @@ heartbeat.</p></li>
 <p>The following is the easiest way to use the program, to grab the private-key
 form the server in 'auto-pwn' mode:</p>
 
-<pre><code>$ heartleech www.example.com -a
+<pre><code>$ heartleech www.example.com --autopwn --threads 5
 </code></pre>
 
 <p>This auto-pwn mode will search for the heartbeat payloads looking for the
 components of the private-key that matches the server's certificate (which
 it automatically retrieves). When a certificate is found, it's printed to
 <var>stdout</var>. The user can then copy it to a file and use it for anythign that
-private-keys can be used for.</p>
+private-keys can be used for. Using multiple threads downloads faster.</p>
 
 <p>Heartbleed information contains more than just private keys. On a typical
 web-server, it'll contain session cookies (useful for sidejacking) and
@@ -141,7 +166,7 @@ passwords. In that case, the way to use this program is to save all the
 heartbleed information into a file. Note that these files quickly grow
 to gigabytes in size:</p>
 
-<pre><code>$ heartleech www.example.com -f bleed.bin
+<pre><code>$ heartleech www.example.com --dump bleed.bin --threads 6
 &lt;ctrl-c>
 $ grep -iobUaP "Cookie:.*\n" bleed.bin
 </code></pre>
@@ -174,7 +199,7 @@ https://github.com/robertdavidgraham/heartbleed</p>
 
   <ol class='man-decor man-foot man foot'>
     <li class='tl'></li>
-    <li class='tc'>April 2014</li>
+    <li class='tc'>May 2014</li>
     <li class='tr'>heartleech(8)</li>
   </ol>
 

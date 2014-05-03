@@ -1,16 +1,19 @@
 .\" generated with Ronn/v0.7.3
 .\" http://github.com/rtomayko/ronn/tree/0.7.3
 .
-.TH "HEARTLEECH" "8" "April 2014" "" ""
+.TH "HEARTLEECH" "8" "May 2014" "" ""
 .
 .SH "NAME"
 \fBheartleech\fR \- Exploits OpenSSL heartbleed vulnerability
 .
 .SH "SYNOPSIS"
-heartleech \fIhost\fR [\-p\fIport\fR] [\-f\fIfilename\fR] [\-a] heartleech \-F\fIfilename\fR \-c\fIcertficate\fR
+heartleech \fIhost\fR [\-p\fIport\fR] [\-\-dump \fIfilename\fR] [\-\-autopwn]
+.
+.P
+heartleech \-\-read \fIfilename\fR \-\-cert \fIcertficate\fR
 .
 .SH "DESCRIPTION"
-\fBheartleech\fR exploits the well\-known "heartbleed" bug in OpenSSL\-1\.0\.1f\. It has a number of features that improve over other heartbleed exploits, such as automatically extracting the SSL private\-key (autopwn)\.
+\fBheartleech\fR exploits the well\-known "heartbleed" bug in <= OpenSSL\-1\.0\.1f\. It has a number of features that improve over other heartbleed exploits, such as automatically extracting the SSL private\-key (autopwn)\.
 .
 .SH "OPTIONS"
 .
@@ -18,31 +21,49 @@ heartleech \fIhost\fR [\-p\fIport\fR] [\-f\fIfilename\fR] [\-a] heartleech \-F\f
 \fB<host>\fR: the target\'s name, IPv4 address, or IPv6 address\.
 .
 .IP "\(bu" 4
-\fB\-p <port>\fR: the port number to connect to on the target machine\. If not specified, the port number 443 will be used\.
+\fB\-\-autopwn\fR: sets "auto\-pwn" mode, which automatically searches the bleeding buffers for the private\-key\. If the private\-key is found, it will be printed to \fIstdout\fR, and the program will exit\.
 .
 .IP "\(bu" 4
-\fB\-f <filename>\fR: the file where bleeding information is stored\. Typically, the user will use this program to grab data from a server, then use other tools to search those files for things, such as cookies, passwords, and private strings\.
+\fB\-\-cert\fR: in offline mode, this option tells the program the certificate to load\. A certificate, containing the public\-key, is needed in order to search data for the matching components of a private key\. In online mode, this option isn\'t necessary, because the certificate is fetched from the server duing the SSL handshake\.
 .
 .IP "\(bu" 4
-\fB\-a\fR: sets "auto\-pwn" mode, which automatically searches the bleeding buffers for the private\-key\. If the private\-key is found, it will be printed to \fIstdout\fR, and the program will exit\.
+\fB\-d\fR: sets the \'debug\' flag, which causes a lot of debug information to be printed to \fIstderr\fR\. Using this will help diagnose connection problems\. You should use this the first time you connect to a new host, just to make sure things are working well\.
 .
 .IP "\(bu" 4
-\fB\-F\fR: instead of running live against a server, this option causes the program to run forensics on existing files, looking for private keys\. The option \fB\-c\fR must also be used\.
+\fB\-\-dump <filename>\fR: the file where bleeding information is stored\. Typically, the user will use this program to grab data from a server, then use other tools to search those files for things, such as cookies, passwords, and private strings\.
 .
 .IP "\(bu" 4
-\fB\-c\fR: in offline mode, this option tells the program the certificate to load\. A certificate, containing the public\-key, is needed in order to search data for the matching components of a private key\. In online mode, this option isn\'t necessary, because the certificate is fetched from the server duing the SSL handshake\.
+\fB\-\-ipver <ver>\fR: sets the version of IP to use, either 4 for IPv4 or 6 for IPv6\. Otherwise, the program tries to guess from the address given, or chooses whichever is first when doing a DNS lookup\. Shorter options of \fB\-\-ipv6\fR and \fB\-\-ipv4\fR also work\.
 .
 .IP "\(bu" 4
-\fB\-d\fR: sets the \'debug\' flag, which causes a lot of debug information to be printed to \fIstderr\fR\. Using this will help diagnose connection problems\.
+\fB\-\-loop <count>\fR: the number of times to loop and try a heartbeat again\. The default count is 1000000 (one\-million)\. A count of 1 grabs just a single heartbeat\.
 .
 .IP "\(bu" 4
-\fB\-v <ipver>\fR: sets the version of IP to use, either 4 for IPv4 or 6 for IPv6\. Otherwise, the program tries to guess from the address given, or chooses whichever is first when doing a DNS lookup\.
+\fB\-\-port <port>\fR: the port number to connect to on the target machine\. If not specified, the port number 443 will be used\.
 .
 .IP "\(bu" 4
-\fB\-S\fR: randomizes the size of heartbleed requests\. Normally, the program requests for the max 64k size, but with this setting, each request will have a random size between 200 and 64k\. Some believe that heartbeats of different size will produce different results\.
+\fB\-\-proxy <host:port>\fR: use the Socks5n proxy\. If the port is not specified, it defaults to 9150\. This is intended for use with the Tor network, but should work with any Socks5 proxy\. These uses the \'name\' feature, so to that it\'ll be the Tor exit node resolving the DNS name, not the local host\.
 .
 .IP "\(bu" 4
-\fB\-l <count>\fR: the number of times to loop and try a heartbeat again\. The default count is 1000000 (one\-million)\. A count of 1 grabs just a single heartbeat\.
+\fB\-\-rand\fR: randomizes the size of heartbleed requests\. Normally, the program requests for the max 64k size, but with this setting, each request will have a random size between 200 and 64k\. Some believe that heartbeats of different size will produce different results\.
+.
+.IP "\(bu" 4
+\fB\-\-read\fR: instead of running live against a server, this option causes the program to run forensics on existing files, looking for private keys\. The option \fB\-\-cert\fR must also be used\.
+.
+.IP "\(bu" 4
+\fB\-\-raw\fR: send the hearbeat requests before SSL negotiation is complete\. Use this option on targets where the post\-handshake heartbeats don\'t work\.
+.
+.IP "\(bu" 4
+\fB\-\-scan\fR: scans target to test if vulnerable, instead of dumping\. This ends the connection immediately\. A verdict will be printed to \fIstdout\fR, either VULNERABLE, SAFE, or INCONCLUSIVE\. Most systems marked INCONCLUSIVE are in fact safe\.
+.
+.IP "\(bu" 4
+\fB\-\-scanlist <filename>\fR: reads a list of targets from a file instead of reading them from a command\-line, and also sets the \fB\-\-scan\fR flag\. Use this when you have thousands of targets to scan\. Note that if you have a lot of targets, you should also set the \fB\-\-threads\fR to a high number\.
+.
+.IP "\(bu" 4
+\fB\-\-threads <count>\fR: uses more than one thread, scanning/dumping a lot faster\. Setting 1000 threads would not be unreasonable, especially when scanning a lot of targets\.
+.
+.IP "\(bu" 4
+\fB\-\-timeout <n>\fR: sets the timeout for read operations on a socket, which defaults to 6 seconds\. Note that connection timeouts are much longer, set by the operating system, and not currently configurable\.
 .
 .IP "" 0
 .
@@ -53,14 +74,14 @@ The following is the easiest way to use the program, to grab the private\-key fo
 .
 .nf
 
-$ heartleech www\.example\.com \-a
+$ heartleech www\.example\.com \-\-autopwn \-\-threads 5
 .
 .fi
 .
 .IP "" 0
 .
 .P
-This auto\-pwn mode will search for the heartbeat payloads looking for the components of the private\-key that matches the server\'s certificate (which it automatically retrieves)\. When a certificate is found, it\'s printed to \fIstdout\fR\. The user can then copy it to a file and use it for anythign that private\-keys can be used for\.
+This auto\-pwn mode will search for the heartbeat payloads looking for the components of the private\-key that matches the server\'s certificate (which it automatically retrieves)\. When a certificate is found, it\'s printed to \fIstdout\fR\. The user can then copy it to a file and use it for anythign that private\-keys can be used for\. Using multiple threads downloads faster\.
 .
 .P
 Heartbleed information contains more than just private keys\. On a typical web\-server, it\'ll contain session cookies (useful for sidejacking) and passwords\. In that case, the way to use this program is to save all the heartbleed information into a file\. Note that these files quickly grow to gigabytes in size:
@@ -69,7 +90,7 @@ Heartbleed information contains more than just private keys\. On a typical web\-
 .
 .nf
 
-$ heartleech www\.example\.com \-f bleed\.bin
+$ heartleech www\.example\.com \-\-dump bleed\.bin \-\-threads 6
 <ctrl\-c>
 $ grep \-iobUaP "Cookie:\.*\en" bleed\.bin
 .

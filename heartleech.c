@@ -2748,7 +2748,7 @@ heartleech_set_parameter(struct DumpArgs *args,
         args->is_scan = 1;
         is_scan = 1;
         return 0; /* no 'value' argument */
-    } else if (EQUALS("threads", name)) {
+    } else if (EQUALS("threads", name) || EQUALS("thread", name)) {
         args->threads.desired = strtoul(value, 0, 0);
         return 1;
     } else if (EQUALS("scanlist", name)) {
@@ -3024,7 +3024,7 @@ main(int argc, char *argv[])
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
     
-    fprintf(stderr, "\n--- heartleech/1.0.0g ---\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0h ---\n");
     fprintf(stderr, "https://github.com/robertdavidgraham/heartleech\n");
 
     load_pcre();

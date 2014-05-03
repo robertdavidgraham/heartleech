@@ -3,12 +3,13 @@ heartleech(8) -- Exploits OpenSSL heartbleed vulnerability
 
 ## SYNOPSIS
 
-heartleech <host> [-p<port>] [-f<filename>] [-a]
-heartleech -F<filename> -c<certficate> 
+heartleech <host> [-p<port>] [--dump <filename>] [--autopwn]
+
+heartleech --read <filename> --cert <certficate> 
 
 ## DESCRIPTION
 
-**heartleech** exploits the well-known "heartbleed" bug in OpenSSL-1.0.1f.
+**heartleech** exploits the well-known "heartbleed" bug in <= OpenSSL-1.0.1f.
 It has a number of features that improve over other heartbleed exploits,
 such as automatically extracting the SSL private-key (autopwn).
 
@@ -16,21 +17,9 @@ such as automatically extracting the SSL private-key (autopwn).
 
   * `<host>`: the target's name, IPv4 address, or IPv6 address.
 
-  * `--port <port>`: the port number to connect to on the target machine. If not
-    specified, the port number 443 will be used.
-
-  * `--dump <filename>`: the file where bleeding information is stored. Typically,
-    the user will use this program to grab data from a server, then use
-    other tools to search those files for things, such as cookies, passwords,
-    and private strings.
-
   * `--autopwn`: sets "auto-pwn" mode, which automatically searches the bleeding
     buffers for the private-key. If the private-key is found, it will be
     printed to <stdout>, and the program will exit.
-
-  * `--read`: instead of running live against a server, this option causes
-    the program to run forensics on existing files, looking for private
-    keys. The option `--cert` must also be used.
 
   * `--cert`: in offline mode, this option tells the program the certificate to
     load. A certificate, containing the public-key, is needed in order to 
@@ -40,34 +29,75 @@ such as automatically extracting the SSL private-key (autopwn).
 
   * `-d`: sets the 'debug' flag, which causes a lot of debug information to
     be printed to <stderr>. Using this will help diagnose connection problems.
+	You should use this the first time you connect to a new host, just to make
+	sure things are working well.
+
+  * `--dump <filename>`: the file where bleeding information is stored. Typically,
+    the user will use this program to grab data from a server, then use
+    other tools to search those files for things, such as cookies, passwords,
+    and private strings.
 
   * `--ipver <ver>`: sets the version of IP to use, either 4 for IPv4 or 6 for 
     IPv6. Otherwise, the program tries to guess from the address given,
-    or chooses whichever is first when doing a DNS lookup.
+    or chooses whichever is first when doing a DNS lookup. Shorter options
+	of `--ipv6` and `--ipv4` also work.
+
+  * `--loop <count>`: the number of times to loop and try a heartbeat again. The
+    default count is 1000000 (one-million). A count of 1 grabs just a single
+    heartbeat.
+
+  * `--port <port>`: the port number to connect to on the target machine. If not
+    specified, the port number 443 will be used.
+
+  * `--proxy <host:port>`: use the Socks5n proxy. If the port is not specified,
+	it defaults to 9150. This is intended for use with the Tor network, but
+	should work with any Socks5 proxy. These uses the 'name' feature, so to
+	that it'll be the Tor exit node resolving the DNS name, not the local
+	host.
 
   * `--rand`: randomizes the size of heartbleed requests. Normally, the program
     requests for the max 64k size, but with this setting, each request
     will have a random size between 200 and 64k. Some believe that heartbeats
     of different size will produce different results.
 
-  * `--loop <count>`: the number of times to loop and try a heartbeat again. The
-    default count is 1000000 (one-million). A count of 1 grabs just a single
-    heartbeat.
+  * `--read`: instead of running live against a server, this option causes
+    the program to run forensics on existing files, looking for private
+    keys. The option `--cert` must also be used.
 
-  * `--raw`: send the hearbeat requests before SSL negotiation is complete.
+  * `--raw`: send the hearbeat requests before SSL negotiation is complete. Use
+	this option on targets where the post-handshake heartbeats don't work.
+
+  * `--scan`: scans target to test if vulnerable, instead of dumping. This
+    ends the connection immediately. A verdict will be printed to <stdout>,
+	either VULNERABLE, SAFE, or INCONCLUSIVE. Most systems marked INCONCLUSIVE
+	are in fact safe.
+
+  * `--scanlist <filename>`: reads a list of targets from a file instead of
+    reading them from a command-line, and also sets the `--scan` flag. Use
+	this when you have thousands of targets to scan. Note that if you have
+	a lot of targets, you should also set the `--threads` to a high number.
+
+  * `--threads <count>`: uses more than one thread, scanning/dumping a lot
+	faster. Setting 1000 threads would not be unreasonable, especially when
+	scanning a lot of targets.
+
+  * `--timeout <n>`: sets the timeout for read operations on a socket, which
+    defaults to 6 seconds. Note that connection timeouts are much longer, set
+	by the operating system, and not currently configurable.
+
 
 ## SIMPLE EXAMPLES
 
 The following is the easiest way to use the program, to grab the private-key
 form the server in 'auto-pwn' mode:
 
-    $ heartleech www.example.com --autopwn
+    $ heartleech www.example.com --autopwn --threads 5
 
 This auto-pwn mode will search for the heartbeat payloads looking for the 
 components of the private-key that matches the server's certificate (which
 it automatically retrieves). When a certificate is found, it's printed to
 <stdout>. The user can then copy it to a file and use it for anythign that
-private-keys can be used for.
+private-keys can be used for. Using multiple threads downloads faster.
 
 Heartbleed information contains more than just private keys. On a typical
 web-server, it'll contain session cookies (useful for sidejacking) and
@@ -75,7 +105,7 @@ passwords. In that case, the way to use this program is to save all the
 heartbleed information into a file. Note that these files quickly grow
 to gigabytes in size:
 
-    $ heartleech www.example.com --dump bleed.bin
+    $ heartleech www.example.com --dump bleed.bin --threads 6
     <ctrl-c>
     $ grep -iobUaP "Cookie:.*\n" bleed.bin
 
