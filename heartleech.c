@@ -2883,24 +2883,56 @@ target_get(const struct DumpArgs *cargs)
     struct Target result;
     
     memset(&result, 0, sizeof(result));
-    
+
+    /*
+     * Remove the target from the list
+     */
     pthread_mutex_lock(&args->mutex);
-    
     if (args->targets.count) {
         args->targets.count--;
-        
         result = args->targets.list[args->targets.count];
     }
-    
     pthread_mutex_unlock(&args->mutex);
     
+    /*
+     * Do some initialization on optional fields
+     */
+    BN_init(&result.n);
+    BN_init(&result.e);
+    result.loop.desired = args->cfg_loopcount;
+    if (result.port > 65535)
+        result.port = args->default_port;
+
     return result;
+}
+
+
+/******************************************************************************
+ ******************************************************************************/
+static void
+target_free(struct Target *target)
+{
+    if (target->hostname)
+        free(target->hostname);
+    if (target->http_request)
+        free(target->http_request);
+    
+    BN_clear(&target->n);
+    BN_clear(&target->e);
+    memset(target, 0, sizeof(*target));
 }
 
 
 /******************************************************************************
  * We may want to run many threads on the same target, dumping the contents.
  * To do this, we just create many duplicate versions of the target.
+ *
+ * The deal is this: when running a scan of a lot of hosts, a single host will
+ * just have 1 thread handling it. However, when doing a "dump" from a single
+ * host, you may want to have multiple threads in order to dump information
+ * from that host faster. Thus, we clone the "target" record for each
+ * thread, making the other parts of the system think it's scanning many
+ * hosts when it's really just one.
  ******************************************************************************/
 static void
 split_targets(struct DumpArgs *args)
@@ -2918,7 +2950,7 @@ split_targets(struct DumpArgs *args)
     new_count = args->threads.desired * targets->count;
 
     /* Create a new target list */
-    targets->list = realloc(targets->list, new_count * sizeof(targets->list[0]));
+    targets->list = realloc(targets->list, new_count*sizeof(targets->list[0]));
     targets->max = new_count;
 
     /* Now make all the copies */
@@ -2933,8 +2965,14 @@ split_targets(struct DumpArgs *args)
     targets->count = new_count;
 }
 
+
 /******************************************************************************
- * Scan a list of targets
+ * Scan/dump a list of targets.
+ *
+ * Sadly, this is non-cohesive task, where we may be scanning or dumping
+ * depending upon command-line line flags. A "scan" stops interacting with
+ * a host once it's found it's verdict, whereas a "dump" continues grabbing
+ * data, looping around and reconnecting to the target.
  ******************************************************************************/
 static void
 run_scan(const struct DumpArgs *args)
@@ -2944,25 +2982,31 @@ run_scan(const struct DumpArgs *args)
         struct Target target;
         unsigned is_starttls = 0;
 
+        /*
+         * Remove the next target to be processed in a thread-safe manner
+         */
         target = target_get(args);
 
-        BN_init(&target.n);
-        BN_init(&target.e);
-
-        target.loop.desired = args->cfg_loopcount;
-
-        if (target.port > 65535)
-            target.port = args->default_port;
-
+        
+        /* Figure out the application-layer information. This is used for 
+         * two purposes. The first is in the case of "STARTTL" negotiating
+         * that must happen in certain protocols (like SMTP, POP3, etc.)
+         * before SSL happens. The second is for operations to keep the 
+         * connection open after the handshake is over, such as HTTP GET
+         * or SMTP NOOP. */
         target.application = port_to_app(target.port, &is_starttls);
         if (is_starttls)
             target.starttls = target.application;
 
+        /* If doing HTTP, then we need to format an HTTP request in order to
+         * keep the connection open and to evade IDS. This request will set
+         * the "host" field appropriately in the request */
         if (target.application == APP_HTTP)
             target.http_request = initialize_http(&target);
 
         /*
-         * Now run the thread
+         * Continue creating connections to the target until we are done.
+         * Note that multiple heartbleeds may be done per connection.
          */
         while (target.loop.done < target.loop.desired) {
             int x;
@@ -2972,7 +3016,8 @@ run_scan(const struct DumpArgs *args)
         }
 
         /*
-         * Print verdict, if doing a scan
+         * Print verdict, if doing a "scan". If doing a "dump", this won't
+         * be printed.
          */
         if (args->is_scan) {
             switch (target.scan_result) {
@@ -3003,10 +3048,16 @@ run_scan(const struct DumpArgs *args)
             }
         }
 
-        if (target.http_request)
-            free(target.http_request);
+        /*
+         * Free the resources used by the target
+         */
+        target_free(&target);
     }
 
+    /* We did a sync_add() to this variable before launching this thread,
+     * and now we do a sync_sub() to indicate that the thread is done.
+     * The master thread waits for this count to go to zero before
+     * it exits the program */
     __sync_fetch_and_sub(&((struct DumpArgs*)args)->threads.running, 1);
 }
 
@@ -3111,6 +3162,7 @@ main(int argc, char *argv[])
             /* drop down */
 
         case Op_Scan:
+            /* scan/dump one or more targets */
             if (args.targets.count == 0) {
                 ERROR_MSG("[-] most specify target host\n");
                 exit(1);
@@ -3118,6 +3170,7 @@ main(int argc, char *argv[])
             if (args.threads.desired == 0)
                 run_scan(&args);
             else {
+                /* if multi-threaded, then launch many threads */
                 unsigned i;
                 for (i=0; i<args.threads.desired; i++) {
                     pthread_t handle;
@@ -3138,7 +3191,8 @@ main(int argc, char *argv[])
             if (args.cert_filename == 0) {
                     ERROR_MSG("[-] must specify certificate file to use\n");
                     ERROR_MSG("[-]   heartleech --cert <filename> ...\n");
-                    //exit(1);
+                    /* don't exit, because in the future we'll be doing
+                     * pattern-matching as well as certificate dumping */
             }
             process_offline_file(&args, 
                                  args.cert_filename, 
