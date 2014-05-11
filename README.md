@@ -33,7 +33,7 @@ system) using the following steps:
     make depend
     make
 
-    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -lpthread -o heartleech
+    gcc ../heartleech/heartleech.c libssl.a libcrypto.a -ldl -lpthread -o heartleech -I./include
 
 On Cygwin (and maybe other platforms), the order in which you link the
 libraries apparently matters, so do "`libcrypto.a`" first, then "`libssl.a`", 
