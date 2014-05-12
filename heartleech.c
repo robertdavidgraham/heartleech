@@ -2494,6 +2494,10 @@ x_split(const char hostname[], unsigned host_index, unsigned host_length,
     *r_range_length = *r_host_length;
 
     for (i=host_index; i<host_length; i++) {
+        if (!isdigit(hostname[i]) && hostname[i] != '.')
+            return;
+    }
+    for (i=host_index; i<host_length; i++) {
         if (hostname[i] == '-') {
             *r_host_length = i - host_index;
             *r_range_index = i + 1;
