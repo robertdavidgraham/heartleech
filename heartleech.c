@@ -3179,7 +3179,7 @@ main(int argc, char *argv[])
                 for (i=0; i<args.threads.desired; i++) {
                     pthread_t handle;
                     __sync_fetch_and_add(&args.threads.running, 1);
-                    pthread_create(&handle, 0, (void(*)(void*))run_scan, &args);
+                    pthread_create(&handle, 0, (void*(*)(void*))run_scan, &args);
                 }
                 while (args.threads.running)
                     usleep(1000);
