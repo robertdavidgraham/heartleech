@@ -25,6 +25,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		117D65C8192683800009579F /* heartleech.8.markdown */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = heartleech.8.markdown; sourceTree = "<group>"; };
 		11A327C318FDCCA900142404 /* heartleech */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = heartleech; sourceTree = BUILT_PRODUCTS_DIR; };
 		11A327DB18FDCE4600142404 /* heartleech.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = heartleech.c; sourceTree = "<group>"; };
 		11B0B49219031D24004C2CCA /* libssl.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libssl.a; path = ../openssl/libssl.a; sourceTree = "<group>"; };
@@ -48,6 +49,7 @@
 		11A327B818FDCCA900142404 = {
 			isa = PBXGroup;
 			children = (
+				117D65C8192683800009579F /* heartleech.8.markdown */,
 				11B0B4961905CC28004C2CCA /* README.md */,
 				11B0B49419031D35004C2CCA /* libcrypto.a */,
 				11B0B49219031D24004C2CCA /* libssl.a */,
