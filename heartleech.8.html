@@ -58,7 +58,6 @@
     <a href="#DESCRIPTION">DESCRIPTION</a>
     <a href="#OPTIONS">OPTIONS</a>
     <a href="#SIMPLE-EXAMPLES">SIMPLE EXAMPLES</a>
-    <a href="#IDS-EVASION">IDS EVASION</a>
     <a href="#SEE-ALSO">SEE ALSO</a>
     <a href="#AUTHORS">AUTHORS</a>
   </div>
@@ -76,9 +75,11 @@
 
 <h2 id="SYNOPSIS">SYNOPSIS</h2>
 
-<p>heartleech <var>host</var> [-p<var>port</var>] [--dump <var>filename</var>] [--autopwn]</p>
+<p>heartleech <var>host</var> [--p <var>port</var>] [--dump <var>filename</var>] [--autopwn] [--threads <var>n</var>]</p>
 
 <p>heartleech --read <var>filename</var> --cert <var>certficate</var></p>
+
+<p>heartleech --scanlist <var>file</var></p>
 
 <h2 id="DESCRIPTION">DESCRIPTION</h2>
 
@@ -89,7 +90,11 @@ such as automatically extracting the SSL private-key (autopwn).</p>
 <h2 id="OPTIONS">OPTIONS</h2>
 
 <ul>
-<li><p><code>&lt;host></code>: the target's name, IPv4 address, or IPv6 address.</p></li>
+<li><p><code>&lt;host></code>: the target's name, IPv4 address, or IPv6 address. IPv4 ranges
+separated by a dash work. This can
+optionally have a port as part of the name using a colon
+(e.g. <code>www.google.com:25</code>). Will try to use STARTTLS on appropriate ports
+instead of raw SSL.</p></li>
 <li><p><code>--autopwn</code>: sets "auto-pwn" mode, which automatically searches the bleeding
 buffers for the private-key. If the private-key is found, it will be
 printed to <var>stdout</var>, and the program will exit.</p></li>
@@ -171,21 +176,25 @@ to gigabytes in size:</p>
 $ grep -iobUaP "Cookie:.*\n" bleed.bin
 </code></pre>
 
-<h2 id="IDS-EVASION">IDS EVASION</h2>
+<p>You can scan for vulnerable targets instead of dumping information:</p>
 
-<p>Soon after the Heartbleed vulnerability was announced, many people published
-'rules' for Snort-like intrusion-detection engines. These rules all trigger
-on the pattern |18 03| in the first two bytes of the TCP payloads.</p>
+<pre><code>$ heartleech --scanlist hostlist.txt --scan 10.0.0.0-10.0.0.255:992 --threads 1000
+</code></pre>
 
-<p>By default, this program avoids putting that pattern in the first two bytes.
-Instead, it tries to put those bytes elsewhere in the payload. Thus, this
-program should genrally avoid that sort of detection.</p>
+<p>Hosts in the this file use the same format as other hostnames, meaning they
+can be ranges, and also have ports specified. Scan speed is likely dictated by
+the number of threads you have. You can have a lot of threads, but scanning
+will still be slower than <code>masscan</code>. The "verdict" from scanning is</p>
 
-<p>Note that this isn't complete IDS evasion. The open-source Bro program,
-and many commercial products, do a full SSL protocol decode, and therefore
-catch this exploit no matter where it is in the packet. Also, by the time
-you read this, it's probable that the Snort-like engines will have upgraded
-their code to support SSL decodes as well.</p>
+<pre><code>* `SAFE` if we know for certain the target is safe, because it either 
+  doesn't support heartbeats at all, or is patched against the bug
+
+* `VULNERABLE` if we know for certain that the target is vulnerable,
+  because we got back a bleed
+
+* `INCONCLUSIVE` if we don't get a response -- which usually means that the
+  target is safe, but we can't tell for sure
+</code></pre>
 
 <h2 id="SEE-ALSO">SEE ALSO</h2>
 

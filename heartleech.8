@@ -7,10 +7,13 @@
 \fBheartleech\fR \- Exploits OpenSSL heartbleed vulnerability
 .
 .SH "SYNOPSIS"
-heartleech \fIhost\fR [\-p\fIport\fR] [\-\-dump \fIfilename\fR] [\-\-autopwn]
+heartleech \fIhost\fR [\-\-p \fIport\fR] [\-\-dump \fIfilename\fR] [\-\-autopwn] [\-\-threads \fIn\fR]
 .
 .P
 heartleech \-\-read \fIfilename\fR \-\-cert \fIcertficate\fR
+.
+.P
+heartleech \-\-scanlist \fIfile\fR
 .
 .SH "DESCRIPTION"
 \fBheartleech\fR exploits the well\-known "heartbleed" bug in <= OpenSSL\-1\.0\.1f\. It has a number of features that improve over other heartbleed exploits, such as automatically extracting the SSL private\-key (autopwn)\.
@@ -18,7 +21,7 @@ heartleech \-\-read \fIfilename\fR \-\-cert \fIcertficate\fR
 .SH "OPTIONS"
 .
 .IP "\(bu" 4
-\fB<host>\fR: the target\'s name, IPv4 address, or IPv6 address\.
+\fB<host>\fR: the target\'s name, IPv4 address, or IPv6 address\. IPv4 ranges separated by a dash work\. This can optionally have a port as part of the name using a colon (e\.g\. \fBwww\.google\.com:25\fR)\. Will try to use STARTTLS on appropriate ports instead of raw SSL\.
 .
 .IP "\(bu" 4
 \fB\-\-autopwn\fR: sets "auto\-pwn" mode, which automatically searches the bleeding buffers for the private\-key\. If the private\-key is found, it will be printed to \fIstdout\fR, and the program will exit\.
@@ -98,14 +101,38 @@ $ grep \-iobUaP "Cookie:\.*\en" bleed\.bin
 .
 .IP "" 0
 .
-.SH "IDS EVASION"
-Soon after the Heartbleed vulnerability was announced, many people published \'rules\' for Snort\-like intrusion\-detection engines\. These rules all trigger on the pattern |18 03| in the first two bytes of the TCP payloads\.
+.P
+You can scan for vulnerable targets instead of dumping information:
+.
+.IP "" 4
+.
+.nf
+
+$ heartleech \-\-scanlist hostlist\.txt \-\-scan 10\.0\.0\.0\-10\.0\.0\.255:992 \-\-threads 1000
+.
+.fi
+.
+.IP "" 0
 .
 .P
-By default, this program avoids putting that pattern in the first two bytes\. Instead, it tries to put those bytes elsewhere in the payload\. Thus, this program should genrally avoid that sort of detection\.
+Hosts in the this file use the same format as other hostnames, meaning they can be ranges, and also have ports specified\. Scan speed is likely dictated by the number of threads you have\. You can have a lot of threads, but scanning will still be slower than \fBmasscan\fR\. The "verdict" from scanning is
 .
-.P
-Note that this isn\'t complete IDS evasion\. The open\-source Bro program, and many commercial products, do a full SSL protocol decode, and therefore catch this exploit no matter where it is in the packet\. Also, by the time you read this, it\'s probable that the Snort\-like engines will have upgraded their code to support SSL decodes as well\.
+.IP "" 4
+.
+.nf
+
+* `SAFE` if we know for certain the target is safe, because it either
+  doesn\'t support heartbeats at all, or is patched against the bug
+
+* `VULNERABLE` if we know for certain that the target is vulnerable,
+  because we got back a bleed
+
+* `INCONCLUSIVE` if we don\'t get a response \-\- which usually means that the
+  target is safe, but we can\'t tell for sure
+.
+.fi
+.
+.IP "" 0
 .
 .SH "SEE ALSO"
 masscan(8)
