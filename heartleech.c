@@ -2640,6 +2640,28 @@ target_add(struct TargetList *targets, const char *hostname)
  * specified on the command-line, in configuration files, in environmental
  * variables, and so forth.
  ******************************************************************************/
+static void
+print_usage()
+{
+    printf("\n");
+    printf("usage:\n");
+    printf(" heartleech --scanlist <file> [--threads <n>]\n");
+    printf("   scans the listed targets for heartbleed vulnerability\n");
+    printf(" heartleech <hostname> --dump <file> [--threads <n>]\n");
+    printf("   aggressively dumps heartbleed info to file for later processing\n");
+    printf(" heartleech --cert <cert> --read <file>\n");
+    printf("   looks for matching private key in dump file\n");
+    printf(" heartleech <hostname> --autopwn [--threads <n>]\n");
+    printf("   automatically scans vulnerable host for private key\n");
+    printf("use '-d' option to debug what's going wrong\n");
+    exit(1);
+}
+
+/******************************************************************************
+ * Called by the configuration-reading function for processing options
+ * specified on the command-line, in configuration files, in environmental
+ * variables, and so forth.
+ ******************************************************************************/
 static unsigned
 heartleech_set_parameter(struct DumpArgs *args,
                             const char name[], const char value[])
@@ -2666,6 +2688,9 @@ heartleech_set_parameter(struct DumpArgs *args,
         memcpy(args->dump_filename, value, strlen(value)+1);
         args->op = Op_Dump;
         return 1;
+    } else if (EQUALS("help", name)) {
+        print_usage();
+        return 0;
     } else if (EQUALS("ipv4", name)) {
         args->ip_ver = 4;
         return 0;
@@ -2844,7 +2869,7 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
          * -t www.google.com
          */
         c = argv[i][1];
-        if (c == 'd' || c == 'a' || c == 'S')
+        if (c == 'd' || c == 'a' || c == 'S' || c == 'h' || c == '?')
             ;
         else if (argv[i][2] == '\0') {
             arg = argv[++i];
@@ -2869,6 +2894,9 @@ read_configuration(struct DumpArgs *args, int argc, char *argv[])
             case 'p': heartleech_set_parameter(args, "port", arg); break;
             case 'S': heartleech_set_parameter(args, "rand", arg); break;
             case 'v': heartleech_set_parameter(args, "ipver", arg); break;
+            case '?': heartleech_set_parameter(args, "help", arg); break;
+            case 'h': heartleech_set_parameter(args, "help", arg); break;
+            case 'H': heartleech_set_parameter(args, "help", arg); break;
             default:
                 fprintf(stderr, "[-] -%c: unknown argument\n", c);
                 exit(1);
@@ -3079,11 +3107,15 @@ main(int argc, char *argv[])
     args.cfg_loopcount = 1000000;
     args.timeout = 6;
     
-    fprintf(stderr, "\n--- heartleech/1.0.0h ---\n");
+    fprintf(stderr, "\n--- heartleech/1.0.0i ---\n");
     fprintf(stderr, "https://github.com/robertdavidgraham/heartleech\n");
 
-    load_pcre();
-
+    /*
+     * NOT HERE YET
+     * In the future, I'm going to load PCRE and search the dumped data for
+     * patterns, such as as Cookies and passwords
+     */
+    //load_pcre();
     //pattern_add(&args.patterns, "[a-zA-Z]*[sS][eE][sS][sS][iI][oO][nN][a-zA-Z0-9=]*;");
     //pattern_add(&args.patterns, "ASPSESSION[A-Z]*=[A-Z]*;");
 
@@ -3093,13 +3125,7 @@ main(int argc, char *argv[])
      */
     if (argc <= 1 ) {
     usage:
-        printf("\n");
-        printf("usage:\n heartleech <hostname> -f<filename>"
-               " [-p<port>] ...\n");
-        printf(" <hostname> is a DNS name or IP address of the target\n");
-        printf(" <filename> is where the heartbleed information is stored\n");
-        printf(" <port> is the port number, defaulting to 443\n");
-        return 1;
+        print_usage();
     }
 
     /*
