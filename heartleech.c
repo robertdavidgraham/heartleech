@@ -3171,7 +3171,11 @@ main(int argc, char *argv[])
      * Open the output/dump file.
      */
     if (args.dump_filename && args.fp == NULL) {
-        args.fp = fopen(args.dump_filename, "ab+");
+        if (strncmp(args.dump_filename, "-", strlen(args.dump_filename)) == 0) {
+            args.fp = stdout;
+        } else {
+            args.fp = fopen(args.dump_filename, "ab+");
+        }
         if (args.fp == NULL) {
             perror(args.dump_filename);
             return -1;
