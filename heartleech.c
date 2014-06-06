@@ -790,11 +790,11 @@ rsa_gen(const BIGNUM *p, const BIGNUM *q, const BIGNUM *e)
 
     /* calculate d mod (p-1) */
     rsa->dmp1 = BN_new();
-    BN_mod(rsa->dmp1, rsa->d, rsa->p, ctx);
+    BN_mod(rsa->dmp1, rsa->d, p1, ctx);
 
     /* calculate d mod (q-1) */
     rsa->dmq1 = BN_new();
-    BN_mod(rsa->dmq1, rsa->d, rsa->q, ctx);
+    BN_mod(rsa->dmq1, rsa->d, q1, ctx);
 
     /* calculate inverse of q mod p */
     rsa->iqmp = BN_new();
